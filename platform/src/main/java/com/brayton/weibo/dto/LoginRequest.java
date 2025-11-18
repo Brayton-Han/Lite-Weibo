@@ -9,7 +9,7 @@ import lombok.Setter;
 @Setter
 public class LoginRequest {
     @NotBlank
-    private String username; // 或者用 email, 实际应用中通常是二者之一
+    private String username;
 
     @NotBlank
     private String password; // 明文密码

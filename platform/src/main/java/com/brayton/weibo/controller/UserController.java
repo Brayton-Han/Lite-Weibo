@@ -5,9 +5,11 @@ import com.brayton.weibo.dto.RegisterRequest;
 import com.brayton.weibo.dto.UserResponse;
 import com.brayton.weibo.entity.User;
 import com.brayton.weibo.service.UserService;
+import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Optional;
@@ -23,7 +25,7 @@ public class UserController {
     }
 
     @PostMapping("/register")
-    public ResponseEntity<String> register(@RequestBody RegisterRequest request) {
+    public ResponseEntity<String> register(@Valid @RequestBody RegisterRequest request) {
         userService.register(request);
         return new ResponseEntity<>("User registered successfully.", HttpStatus.CREATED);
     }
@@ -34,10 +36,9 @@ public class UserController {
         return ResponseEntity.ok(message);
     }
 
-    @GetMapping("/user/me")
-    public ResponseEntity<UserResponse> getCurrentUserInfo() {
-        UserResponse userResponse = userService.getCurrentUserInfo();
-        return new ResponseEntity<>(userResponse, HttpStatus.OK);
+    @GetMapping("/me")
+    public UserResponse getCurrentUserInfo(@AuthenticationPrincipal UserResponse user) {
+        return user;
     }
 
     @GetMapping("user/{id}")

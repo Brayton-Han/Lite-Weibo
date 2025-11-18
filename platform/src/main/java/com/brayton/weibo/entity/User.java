@@ -2,6 +2,7 @@ package com.brayton.weibo.entity;
 
 import jakarta.persistence.*;
 import lombok.Getter;
+import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.time.LocalDateTime;
@@ -9,10 +10,11 @@ import java.time.LocalDateTime;
 @Entity
 @Table(name = "users")
 @Getter
+@NoArgsConstructor
 public class User {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private long id;
+    private Long id;
 
     @Column(nullable = false, unique = true)
     private String username;
@@ -31,7 +33,6 @@ public class User {
 
     private LocalDateTime createdAt =  LocalDateTime.now();
 
-    public User() {}
     public User(String username, String passwordHashed, String email) {
         this.username = username;
         this.passwordHashed = passwordHashed;
