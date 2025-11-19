@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Weibo Lite - 前端原型</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+        .hidden-page { display: none; }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+
+<div class="fixed top-0 left-0 w-full bg-gray-800 text-white p-2 z-50 flex justify-center space-x-4 shadow-md text-sm">
+    <span class="text-gray-400 self-center mr-4">预览切换:</span>
+    <button onclick="showPage('login')" class="hover:text-blue-300 px-2">1. 登录页</button>
+    <button onclick="showPage('register')" class="hover:text-blue-300 px-2">2. 注册页</button>
+    <button onclick="showPage('my-profile')" class="hover:text-blue-300 px-2">3. 个人主页 (我)</button>
+    <button onclick="showPage('user-profile')" class="hover:text-blue-300 px-2">4. 用户主页 (他人)</button>
+</div>
+
+<div class="pt-16 flex items-center justify-center min-h-screen p-4">
+
+    <div id="login" class="page-view w-full max-w-md bg-white rounded-xl shadow-lg overflow-hidden">
+        <div class="p-8">
+            <div class="text-center mb-8">
+                <div class="text-4xl text-orange-500 mb-2"><i class="fab fa-weibo"></i></div>
+                <h2 class="text-2xl font-bold text-gray-800">欢迎回来</h2>
+                <p class="text-gray-500 text-sm mt-1">请登录您的账号</p>
+            </div>
+            <form onsubmit="event.preventDefault();">
+                <div class="mb-4">
+                    <label class="block text-gray-700 text-sm font-bold mb-2">用户名</label>
+                    <input class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:border-orange-500 bg-gray-50" type="text" placeholder="请输入用户名" value="brayton_dev">
+                </div>
+                <div class="mb-6">
+                    <label class="block text-gray-700 text-sm font-bold mb-2">密码</label>
+                    <input class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:border-orange-500 bg-gray-50" type="password" value="123456">
+                </div>
+                <button class="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 px-4 rounded-lg transition duration-300">
+                    登 录
+                </button>
+            </form>
+            <div class="mt-6 text-center text-sm">
+                <span class="text-gray-500">还没有账号?</span>
+                <a href="#" onclick="showPage('register')" class="text-orange-500 font-bold ml-1 hover:underline">立即注册</a>
+            </div>
+        </div>
+    </div>
+
+    <div id="register" class="page-view w-full max-w-md bg-white rounded-xl shadow-lg overflow-hidden hidden-page">
+        <div class="p-8">
+            <div class="text-center mb-6">
+                <h2 class="text-2xl font-bold text-gray-800">创建新账号</h2>
+                <p class="text-gray-500 text-sm mt-1">加入我们，分享新鲜事</p>
+            </div>
+            <form onsubmit="event.preventDefault();">
+                <div class="mb-4">
+                    <label class="block text-gray-700 text-sm font-bold mb-2">用户名</label>
+                    <input class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:border-orange-500 bg-gray-50" type="text" placeholder="设置用户名">
+                </div>
+                <div class="mb-4">
+                    <label class="block text-gray-700 text-sm font-bold mb-2">电子邮箱</label>
+                    <input class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:border-orange-500 bg-gray-50" type="email" placeholder="example@email.com">
+                </div>
+                <div class="mb-6">
+                    <label class="block text-gray-700 text-sm font-bold mb-2">密码</label>
+                    <input class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:border-orange-500 bg-gray-50" type="password" placeholder="设置密码">
+                </div>
+                <button class="w-full bg-gray-800 hover:bg-gray-900 text-white font-bold py-2 px-4 rounded-lg transition duration-300">
+                    注 册
+                </button>
+            </form>
+            <div class="mt-6 text-center text-sm">
+                <span class="text-gray-500">已有账号?</span>
+                <a href="#" onclick="showPage('login')" class="text-orange-500 font-bold ml-1 hover:underline">直接登录</a>
+            </div>
+        </div>
+    </div>
+
+    <div id="my-profile" class="page-view w-full max-w-2xl hidden-page">
+        <nav class="bg-white shadow-sm px-6 py-3 flex justify-between items-center rounded-t-xl mb-1">
+            <div class="text-orange-500 text-xl font-bold"><i class="fab fa-weibo"></i> Weibo</div>
+            <div class="space-x-4 text-gray-600 text-sm">
+                <a href="#" class="font-bold text-gray-900 border-b-2 border-orange-500 pb-3">我的</a>
+                <a href="#" class="hover:text-orange-500">发现</a>
+                <a href="#" onclick="showPage('login')" class="text-red-500 hover:text-red-700"><i class="fas fa-sign-out-alt"></i> 退出</a>
+            </div>
+        </nav>
+
+        <div class="bg-white shadow rounded-b-xl overflow-hidden">
+            <div class="h-32 bg-gradient-to-r from-orange-400 to-pink-500 relative"></div>
+
+            <div class="px-6 pb-6">
+                <div class="flex justify-between items-end -mt-12 mb-4">
+                    <div class="relative">
+                        <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=brayton" class="w-24 h-24 rounded-full border-4 border-white bg-white shadow-md">
+                    </div>
+                    <button class="px-4 py-1.5 bg-white border border-gray-300 text-gray-700 font-semibold rounded-full hover:bg-gray-50 text-sm shadow-sm transition">
+                        编辑资料
+                    </button>
+                </div>
+
+                <div>
+                    <h1 class="text-xl font-bold text-gray-900">Brayton_Dev <i class="fas fa-check-circle text-blue-400 text-sm"></i></h1>
+                    <p class="text-gray-500 text-sm">@brayton_dev • brayton@example.com</p>
+                </div>
+
+                <div class="mt-3 text-gray-800 text-sm leading-relaxed">
+                    Java 后端开发者 | Spring Boot 爱好者 | 正在构建这个 Weibo 系统 🚀
+                </div>
+
+                <div class="mt-3 flex items-center text-gray-400 text-xs space-x-4">
+                    <span><i class="far fa-calendar-alt mr-1"></i> 加入于 2023年11月</span>
+                    <span><i class="fas fa-map-marker-alt mr-1"></i> 上海</span>
+                </div>
+
+                <div class="flex mt-4 border-t pt-4 text-sm">
+                    <div class="mr-6"><span class="font-bold text-gray-900">142</span> <span class="text-gray-500">关注</span></div>
+                    <div class="mr-6"><span class="font-bold text-gray-900">10.5k</span> <span class="text-gray-500">粉丝</span></div>
+                </div>
+            </div>
+
+            <div class="flex border-t text-center">
+                <div class="flex-1 py-3 text-orange-500 font-bold border-b-2 border-orange-500 cursor-pointer bg-gray-50">微博</div>
+                <div class="flex-1 py-3 text-gray-500 hover:bg-gray-50 cursor-pointer">相册</div>
+                <div class="flex-1 py-3 text-gray-500 hover:bg-gray-50 cursor-pointer">赞</div>
+            </div>
+
+            <div class="p-6 min-h-[200px] bg-gray-50 text-center text-gray-400 text-sm flex flex-col items-center justify-center">
+                <i class="fas fa-pencil-alt mb-2 text-2xl"></i>
+                <p>空空如也，快去发布第一条微博吧！</p>
+            </div>
+        </div>
+    </div>
+
+    <div id="user-profile" class="page-view w-full max-w-2xl hidden-page">
+        <nav class="bg-white shadow-sm px-6 py-3 flex justify-between items-center rounded-t-xl mb-1">
+            <div class="text-orange-500 text-xl font-bold"><i class="fab fa-weibo"></i> Weibo</div>
+            <div class="space-x-4 text-gray-600 text-sm">
+                <a href="#" onclick="showPage('my-profile')" class="hover:text-orange-500">我的</a>
+                <a href="#" class="font-bold text-gray-900 border-b-2 border-orange-500 pb-3">浏览</a>
+            </div>
+        </nav>
+
+        <div class="bg-white shadow rounded-b-xl overflow-hidden">
+            <div class="h-32 bg-gradient-to-r from-blue-400 to-indigo-500 relative"></div>
+
+            <div class="px-6 pb-6">
+                <div class="flex justify-between items-end -mt-12 mb-4">
+                    <div class="relative">
+                        <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=visitor" class="w-24 h-24 rounded-full border-4 border-white bg-white shadow-md">
+                    </div>
+                    <div class="space-x-2">
+                        <button class="px-4 py-1.5 bg-orange-500 text-white font-semibold rounded-full hover:bg-orange-600 text-sm shadow-md transition">
+                            <i class="fas fa-plus"></i> 关注
+                        </button>
+                        <button class="px-4 py-1.5 bg-white border border-gray-300 text-gray-700 font-semibold rounded-full hover:bg-gray-50 text-sm shadow-sm transition">
+                            <i class="far fa-envelope"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <div>
+                    <h1 class="text-xl font-bold text-gray-900">Traveler_Joe</h1>
+                    <p class="text-gray-500 text-sm">@travel_joe</p>
+                </div>
+
+                <div class="mt-3 text-gray-800 text-sm leading-relaxed">
+                    摄影师 | 旅行博主 | 记录美好生活 📷
+                </div>
+
+                <div class="mt-3 flex items-center text-gray-400 text-xs space-x-4">
+                    <span><i class="far fa-calendar-alt mr-1"></i> 加入于 2024年1月</span>
+                </div>
+
+                <div class="flex mt-4 border-t pt-4 text-sm">
+                    <div class="mr-6"><span class="font-bold text-gray-900">25</span> <span class="text-gray-500">关注</span></div>
+                    <div class="mr-6"><span class="font-bold text-gray-900">3,402</span> <span class="text-gray-500">粉丝</span></div>
+                </div>
+            </div>
+
+            <div class="bg-gray-50 border-t">
+                <div class="p-4 border-b bg-white hover:bg-gray-50 transition">
+                    <div class="flex space-x-3">
+                        <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=visitor" class="w-10 h-10 rounded-full">
+                        <div>
+                            <div class="flex items-center space-x-2">
+                                <span class="font-bold text-sm text-gray-900">Traveler_Joe</span>
+                                <span class="text-xs text-gray-500">2小时前</span>
+                            </div>
+                            <p class="text-sm text-gray-800 mt-1">今天的天气真不错！准备去爬山。🏔️</p>
+                            <div class="mt-2 flex space-x-8 text-gray-500 text-xs">
+                                <span class="hover:text-orange-500 cursor-pointer"><i class="far fa-comment"></i> 12</span>
+                                <span class="hover:text-orange-500 cursor-pointer"><i class="fas fa-retweet"></i> 4</span>
+                                <span class="hover:text-red-500 cursor-pointer"><i class="far fa-heart"></i> 56</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<script>
+    function showPage(pageId) {
+        // 隐藏所有页面
+        document.querySelectorAll('.page-view').forEach(el => el.classList.add('hidden-page'));
+        document.querySelectorAll('.page-view').forEach(el => el.classList.remove('flex'));
+        // 显示目标页面
+        const target = document.getElementById(pageId);
+        target.classList.remove('hidden-page');
+        // 如果是登录注册页，不需要 flex-col 布局，保持默认即可
+    }
+    // 默认显示登录页
+    showPage('login');
+</script>
+</body>
+</html>

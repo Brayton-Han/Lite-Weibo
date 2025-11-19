@@ -27,7 +27,7 @@ public class UserService {
             throw new RuntimeException("Username or email already taken.");
         }
 
-        // 2. 处理密码（真实项目是加密，这里简化）
+        // 2. 处理密码
         String encodedPassword = passwordEncoder.encode(request.getPassword());
 
         // 3. 保存用户
