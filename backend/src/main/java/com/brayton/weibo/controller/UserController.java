@@ -46,4 +46,9 @@ public class UserController {
         UserResponse userResponse = userService.getUserInfoById(id);
         return new ResponseEntity<>(userResponse, HttpStatus.OK);
     }
+
+    @GetMapping("/ping")
+    public String ping() {
+        return "pong";
+    }
 }

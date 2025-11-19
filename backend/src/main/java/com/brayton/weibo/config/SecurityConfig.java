@@ -36,7 +36,7 @@ public class SecurityConfig {
                 // 授权规则配置
                 .authorizeHttpRequests(auth -> auth
                         // 允许所有人访问登录和注册端点
-                        .requestMatchers("/login", "/register").permitAll()
+                        .requestMatchers("/login", "/register", "ping").permitAll()
                         // 其他所有请求都需要认证
                         .anyRequest().authenticated()
                 )
