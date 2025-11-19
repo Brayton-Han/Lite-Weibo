@@ -10,7 +10,7 @@ import org.springframework.stereotype.Service;
 @Service
 public class JWTService {
 
-    // 建议将秘钥存储在配置文件 (application.properties/yml) 中
+    // 秘钥存储在配置文件 application.yml 中
     @Value("${jwt.secret:A_STRONG_AND_SECURE_SECRET_KEY_FOR_SIGNATURE}")
     private String secret;
 

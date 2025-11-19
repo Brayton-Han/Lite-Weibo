@@ -5,6 +5,8 @@ import com.brayton.weibo.dto.LoginRequest;
 import com.brayton.weibo.dto.RegisterRequest;
 import com.brayton.weibo.dto.UserResponse;
 import com.brayton.weibo.entity.User;
+import com.brayton.weibo.error.CommonErrorCode;
+import com.brayton.weibo.error.WeiboException;
 import com.brayton.weibo.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -24,7 +26,7 @@ public class UserService {
 
         // 1. 检查用户名或邮箱是否已存在
         if (userRepository.existsByUsernameOrEmail(request.getUsername(), request.getEmail())) {
-            throw new RuntimeException("Username or email already taken.");
+            throw new WeiboException(CommonErrorCode.USER_EXISTS);
         }
 
         // 2. 处理密码
@@ -40,13 +42,13 @@ public class UserService {
         // 1. 查找用户
         Optional<User> userOptional = userRepository.findByUsername(request.getUsername());
         if (userOptional.isEmpty()) {
-            throw new RuntimeException("Username not found.");
+            throw new WeiboException(CommonErrorCode.USER_NOT_FOUND);
         }
         User user = userOptional.get();
 
         // 2. 验证密码 (实际应用中需要用 passwordEncoder.matches(rawPassword, encodedPassword) 验证)
         if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHashed())) { // 临时简化处理
-            throw new RuntimeException("Invalid password.");
+            throw new WeiboException(CommonErrorCode.INVALID_PASSWORD);
         }
 
         return jWTService.generateToken(user.getId());
@@ -56,7 +58,7 @@ public class UserService {
 
         Optional<User> userOptional = userRepository.findById(id);
         if (userOptional.isEmpty()) {
-            throw new RuntimeException("User not found.");
+            throw new WeiboException(CommonErrorCode.USER_NOT_FOUND);
         }
 
         return new UserResponse(userOptional.get());
@@ -66,7 +68,7 @@ public class UserService {
 
         Optional<User> userOptional = userRepository.findByUsername(username);
         if (userOptional.isEmpty()) {
-            throw new RuntimeException("User not found.");
+            throw new WeiboException(CommonErrorCode.USER_NOT_FOUND);
         }
 
         return new UserResponse(userOptional.get());

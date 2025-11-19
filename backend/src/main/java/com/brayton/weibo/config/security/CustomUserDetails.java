@@ -1,6 +1,5 @@
 package com.brayton.weibo.config.security;
 
-import com.brayton.weibo.entity.User;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
