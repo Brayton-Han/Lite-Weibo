@@ -1,5 +1,6 @@
 package com.brayton.weibo.controller;
 
+import com.brayton.weibo.config.security.CustomUserDetails;
 import com.brayton.weibo.dto.LoginRequest;
 import com.brayton.weibo.dto.RegisterRequest;
 import com.brayton.weibo.dto.UserResponse;
@@ -31,14 +32,15 @@ public class UserController {
     }
 
     @PostMapping("/login") // 登录应该使用 POST 请求
-    public ResponseEntity<String> login(@RequestBody LoginRequest request) {
+    public ResponseEntity<String> login(@Valid @RequestBody LoginRequest request) {
         String message = userService.login(request);
         return ResponseEntity.ok(message);
     }
 
     @GetMapping("/me")
-    public UserResponse getCurrentUserInfo(@AuthenticationPrincipal UserResponse user) {
-        return user;
+    public ResponseEntity<UserResponse> getCurrentUserInfo(@AuthenticationPrincipal CustomUserDetails user) {
+        UserResponse userResponse = userService.getUserInfoById(user.getId());
+        return new ResponseEntity<>(userResponse, HttpStatus.OK);
     }
 
     @GetMapping("user/{id}")

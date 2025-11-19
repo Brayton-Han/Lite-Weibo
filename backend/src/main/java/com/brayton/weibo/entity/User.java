@@ -1,11 +1,14 @@
 package com.brayton.weibo.entity;
 
 import jakarta.persistence.*;
+import jakarta.websocket.server.ServerEndpoint;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Date;
 
 @Entity
 @Table(name = "users")
@@ -26,12 +29,24 @@ public class User {
     private String email;
 
     @Setter
+    private Gender gender = Gender.FEMALE;
+
+    @Setter
     private String avatarUrl;
 
     @Setter
     private String bio;
 
+    @Setter
+    private LocalDate birthday;
+
+    @Setter
+    private Long phoneNumber;
+
     private LocalDateTime createdAt =  LocalDateTime.now();
+
+    @Setter
+    private LocalDateTime updatedAt = LocalDateTime.now();
 
     public User(String username, String passwordHashed, String email) {
         this.username = username;

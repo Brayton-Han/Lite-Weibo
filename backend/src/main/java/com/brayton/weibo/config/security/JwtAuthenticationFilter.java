@@ -45,7 +45,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 // 3. 将用户信息设置到 SecurityContext 中 (表示已认证)
                 if (userId != null && SecurityContextHolder.getContext().getAuthentication() == null) {
 
-                    UserResponse userPrincipal = (UserResponse) userService.getUserInfoById(userId);
+                    CustomUserDetails userPrincipal = new CustomUserDetails(userId);
 
                     UsernamePasswordAuthenticationToken authentication =
                             new UsernamePasswordAuthenticationToken(userPrincipal, null, userPrincipal.getAuthorities());
