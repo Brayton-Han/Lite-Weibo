@@ -1,17 +1,13 @@
-async function getPing() {
-  const res = await fetch("http://localhost:8080/ping", {
-    cache: "no-store",
-  });
+'use client';
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 
-  return res.text();
-}
+export default function Home() {
+  const router = useRouter();
 
-export default async function Home() {
-  const result = await getPing();
+  useEffect(() => {
+    router.push('/me');
+  }, [router]);
 
-  return (
-    <div className="p-6">
-      <h1 className="text-xl font-semibold">后端回应：{result}</h1>
-    </div>
-  );
+  return null;
 }
