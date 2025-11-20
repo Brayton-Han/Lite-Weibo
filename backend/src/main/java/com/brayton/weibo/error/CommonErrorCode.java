@@ -9,6 +9,9 @@ public enum CommonErrorCode implements ErrorCode {
     USER_NOT_FOUND(1001, "user not found"),
     INVALID_PASSWORD(1002, "invalid password"),
     USER_EXISTS(1003, "username or email already exists"),
+    FOLLOWING_ID_ALREADY_EXISTS(1004, "you have already following the user"),
+    FOLLOWING_ID_NOT_EXISTS(1005, "you have not following the user"),
+    FOLLOW_YOURSELF(1006, "you can't follow yourself"),
 
     TOKEN_EXPIRED(2001, "Token expired"),
 

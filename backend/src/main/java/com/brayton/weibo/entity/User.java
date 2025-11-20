@@ -45,6 +45,12 @@ public class User {
     @Setter
     private LocalDateTime updatedAt = LocalDateTime.now();
 
+    @Column(nullable = false)
+    private int followerCount = 0;
+
+    @Column(nullable = false)
+    private int followCount = 0;
+
     public User(String username, String passwordHashed, String email) {
         this.username = username;
         this.passwordHashed = passwordHashed;

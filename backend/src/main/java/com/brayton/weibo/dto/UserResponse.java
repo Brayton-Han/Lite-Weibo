@@ -14,22 +14,24 @@ import java.time.LocalDate;
 public class UserResponse {
     private Long id;
     private String username;
-    private String email;
     private Gender gender;
     private String avatarUrl;
     private String bio;
     private LocalDate birthday;
     private LocalDate joinDate;
+    private int followerCount;
+    private int followCount;
 
     // 构造函数，用于将 User 实体转换为 Response DTO
     public UserResponse(User user) {
         this.id = user.getId();
         this.username = user.getUsername();
-        this.email = user.getEmail();
         this.gender = user.getGender();
         this.avatarUrl = user.getAvatarUrl();
         this.bio = user.getBio();
         this.birthday = user.getBirthday();
         this.joinDate = user.getCreatedAt().toLocalDate();
+        this.followerCount = user.getFollowerCount();
+        this.followCount = user.getFollowCount();
     }
 }

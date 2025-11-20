@@ -73,4 +73,14 @@ public class UserService {
 
         return new UserResponse(userOptional.get());
     }
+
+    public String getUsernameById(long id) {
+
+        Optional<User> userOptional = userRepository.findById(id);
+        if (userOptional.isEmpty()) {
+            throw new WeiboException(CommonErrorCode.USER_NOT_FOUND);
+        }
+
+        return userOptional.get().getUsername();
+    }
 }
