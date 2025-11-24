@@ -48,7 +48,7 @@ export default function MePage() {
             {/* 头像 */}
             <div className="relative">
               <img 
-                src={user.avatarUrl || "https://via.placeholder.com/150"} 
+                src={user.avatarUrl || "/IMG_6358.jpg"} 
                 alt={user.username}
                 className="w-24 h-24 rounded-full border-4 border-white bg-white object-cover"
               />
