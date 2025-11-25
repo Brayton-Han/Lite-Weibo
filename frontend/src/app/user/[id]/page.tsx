@@ -22,6 +22,7 @@ export default function UserProfilePage({ params }: { params: Promise<{ id: stri
         const userRes = await api.get(`/user/${userId}`);
         if (userRes.data.code === 0) {
           setUser(userRes.data.data);
+          setIsFollowing(userRes.data.data.following);
         } else {
           toast.error(userRes.data.message || "Failed to load user data");
         }

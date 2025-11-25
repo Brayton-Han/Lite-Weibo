@@ -34,7 +34,7 @@ public class UserController {
 
     @GetMapping("/me")
     public ResponseEntity<ApiResponse<?>> getCurrentUserInfo(@AuthenticationPrincipal CustomUserDetails user) {
-        UserResponse userResponse = userService.getUserInfoById(user.getId());
+        UserResponse userResponse = userService.getUserInfoById(user.getId(), user.getId());
         return ResponseEntity.ok(ApiResponse.success(userResponse));
     }
 
@@ -45,8 +45,8 @@ public class UserController {
     }
 
     @GetMapping("user/{id}")
-    public ResponseEntity<ApiResponse<?>> getUserById(@PathVariable long id) {
-        UserResponse userResponse = userService.getUserInfoById(id);
+    public ResponseEntity<ApiResponse<?>> getUserById(@AuthenticationPrincipal CustomUserDetails self, @PathVariable long id) {
+        UserResponse userResponse = userService.getUserInfoById(id, self.getId());
         return ResponseEntity.ok(ApiResponse.success(userResponse));
     }
 

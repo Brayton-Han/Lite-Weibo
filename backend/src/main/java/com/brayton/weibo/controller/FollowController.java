@@ -33,14 +33,12 @@ public class FollowController {
     @PostMapping("/follow/{id}")
     public ResponseEntity<ApiResponse<?>> follow(@AuthenticationPrincipal CustomUserDetails me, @PathVariable long id) {
         followService.follow(me.getId(), id);
-        String name = userService.getUserInfoById(id).getUsername();
-        return ResponseEntity.ok(ApiResponse.success("Successfully followed " + name));
+        return ResponseEntity.ok(ApiResponse.success("Successfully followed"));
     }
 
     @DeleteMapping("/follow/{id}")
     public ResponseEntity<ApiResponse<?>> unfollow(@AuthenticationPrincipal CustomUserDetails me, @PathVariable long id) {
         followService.unfollow(me.getId(), id);
-        String name = userService.getUserInfoById(id).getUsername();
-        return ResponseEntity.ok(ApiResponse.success("Successfully unfollowed " + name));
+        return ResponseEntity.ok(ApiResponse.success("Successfully unfollowed"));
     }
 }

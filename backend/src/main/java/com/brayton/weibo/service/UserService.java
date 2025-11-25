@@ -7,6 +7,7 @@ import com.brayton.weibo.dto.UserResponse;
 import com.brayton.weibo.entity.User;
 import com.brayton.weibo.error.CommonErrorCode;
 import com.brayton.weibo.error.WeiboException;
+import com.brayton.weibo.repository.FollowRepository;
 import com.brayton.weibo.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -21,6 +22,7 @@ public class UserService {
     private final UserRepository userRepository;
     private final JWTService jWTService;
     private final PasswordEncoder passwordEncoder;
+    private final FollowRepository followRepository;
 
     public void register(RegisterRequest request) {
 
@@ -54,24 +56,14 @@ public class UserService {
         return jWTService.generateToken(user.getId());
     }
 
-    public UserResponse getUserInfoById(long id) {
+    public UserResponse getUserInfoById(long id, long selfId) {
 
         Optional<User> userOptional = userRepository.findById(id);
         if (userOptional.isEmpty()) {
             throw new WeiboException(CommonErrorCode.USER_NOT_FOUND);
         }
 
-        return new UserResponse(userOptional.get());
-    }
-
-    public UserResponse getUserInfoByUsername(String username) {
-
-        Optional<User> userOptional = userRepository.findByUsername(username);
-        if (userOptional.isEmpty()) {
-            throw new WeiboException(CommonErrorCode.USER_NOT_FOUND);
-        }
-
-        return new UserResponse(userOptional.get());
+        return new UserResponse(userOptional.get(), followRepository.existsByFollowerIdAndFollowingId(selfId, id));
     }
 
     public String getUsernameById(long id) {

@@ -22,6 +22,7 @@ export interface User {
   joinDate: string;
   followerCount: number;
   followCount: number;
+  following: boolean;
 }
 
 // 登录请求参数

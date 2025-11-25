@@ -21,9 +21,10 @@ public class UserResponse {
     private LocalDate joinDate;
     private int followerCount;
     private int followCount;
+    private boolean following;
 
     // 构造函数，用于将 User 实体转换为 Response DTO
-    public UserResponse(User user) {
+    public UserResponse(User user, boolean followed) {
         this.id = user.getId();
         this.username = user.getUsername();
         this.gender = user.getGender();
@@ -33,5 +34,6 @@ public class UserResponse {
         this.joinDate = user.getCreatedAt().toLocalDate();
         this.followerCount = user.getFollowerCount();
         this.followCount = user.getFollowCount();
+        this.following = followed;
     }
 }
