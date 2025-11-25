@@ -12,6 +12,7 @@ public enum CommonErrorCode implements ErrorCode {
     FOLLOWING_ID_ALREADY_EXISTS(1004, "you have already following the user"),
     FOLLOWING_ID_NOT_EXISTS(1005, "you have not following the user"),
     FOLLOW_YOURSELF(1006, "you can't follow yourself"),
+    USERNAME_ALREADY_EXISTS(1007, "username already exists"),
 
     TOKEN_EXPIRED(2001, "Token expired"),
 

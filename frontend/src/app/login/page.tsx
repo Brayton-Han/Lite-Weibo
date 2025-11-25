@@ -15,8 +15,7 @@ export default function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-
-    try {
+    
       const res = await api.post<ApiResponse<string>>('/login', formData);
       const responseData = res.data;
 
@@ -30,13 +29,9 @@ export default function LoginPage() {
         // 调用全局配置的 Toast 显示错误
         toast.error(responseData.message || 'Login failed');
       }
-    } catch (err: any) {
-      console.error(err);
-      const backendMsg = err.response?.data?.message || 'Unknown error';
-      toast.error(backendMsg);
-    } finally {
+    
       setLoading(false);
-    }
+    
   };
 
   return (

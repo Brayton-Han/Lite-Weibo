@@ -26,7 +26,7 @@ public class GlobalExceptionHandler {
                 request.getRequestURI()
         );
 
-        return new ResponseEntity<>(error, HttpStatus.BAD_REQUEST);
+        return new ResponseEntity<>(error, HttpStatus.OK);
     }
 
 
@@ -45,7 +45,7 @@ public class GlobalExceptionHandler {
                 request.getRequestURI()
         );
 
-        return new ResponseEntity<>(error, HttpStatus.BAD_REQUEST);
+        return new ResponseEntity<>(error, HttpStatus.OK);
     }
 
 }

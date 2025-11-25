@@ -83,4 +83,30 @@ public class UserService {
 
         return userOptional.get().getUsername();
     }
+
+    public void update(long id, UserResponse info) {
+        // 1. 查找当前用户
+        // 必须从数据库获取最新的实体对象，而不是直接 new User()，否则会丢失原有的其他字段（如密码、创建时间等）
+        User user = userRepository.findById(id)
+                .orElseThrow(() -> new WeiboException(CommonErrorCode.USER_NOT_FOUND));
+
+        // 2. 处理用户名变更逻辑
+        // 如果前端传来的用户名和数据库里存的不一样，说明用户想改名
+        if (!user.getUsername().equals(info.getUsername())) {
+            // 必须检查新名字是否已经被其他人占用了
+            Optional<User> existingUser = userRepository.findByUsername(info.getUsername());
+            if (existingUser.isPresent()) {
+                throw new WeiboException(CommonErrorCode.USERNAME_ALREADY_EXISTS);
+            }
+            user.setUsername(info.getUsername());
+        }
+
+        // 3. 更新其他基础信息
+        user.setGender(info.getGender());
+        user.setBio(info.getBio());
+        user.setBirthday(info.getBirthday());
+
+        // 4. 保存更改
+        userRepository.save(user);
+    }
 }

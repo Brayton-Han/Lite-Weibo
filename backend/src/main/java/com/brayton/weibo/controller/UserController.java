@@ -38,6 +38,12 @@ public class UserController {
         return ResponseEntity.ok(ApiResponse.success(userResponse));
     }
 
+    @PutMapping("/me")
+    public ResponseEntity<ApiResponse<?>> updateCurrentUserInfo(@AuthenticationPrincipal CustomUserDetails user, @RequestBody UserResponse info) {
+        userService.update(user.getId(), info);
+        return ResponseEntity.ok(ApiResponse.success("User info updated successfully."));
+    }
+
     @GetMapping("user/{id}")
     public ResponseEntity<ApiResponse<?>> getUserById(@PathVariable long id) {
         UserResponse userResponse = userService.getUserInfoById(id);

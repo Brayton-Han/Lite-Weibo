@@ -1,9 +1,11 @@
 'use client';
+
 import { useEffect, useState, use } from 'react';
 import api from '@/lib/api';
 import Navbar from '@/components/Navbar';
-import { User } from '@/types';
+import { User, ApiResponse } from '@/types';
 import { UserCircle, UserPlus, UserMinus } from 'lucide-react';
+import { toast } from 'react-hot-toast';
 
 export default function UserProfilePage({ params }: { params: Promise<{ id: string }> }) {
   // Next.js 15+ param unwrapping
@@ -11,54 +13,60 @@ export default function UserProfilePage({ params }: { params: Promise<{ id: stri
   const userId = resolvedParams.id;
 
   const [user, setUser] = useState<User | null>(null);
-  const [isFollowing, setIsFollowing] = useState(false); // 简单处理：实际应从后端获取是否已关注
+  const [isFollowing, setIsFollowing] = useState(false); 
   const [loading, setLoading] = useState(true);
 
-  // 获取用户信息
+  // Get user info
   useEffect(() => {
     const fetchData = async () => {
-      try {
         const userRes = await api.get(`/user/${userId}`);
         if (userRes.data.code === 0) {
           setUser(userRes.data.data);
+        } else {
+          toast.error(userRes.data.message || "Failed to load user data");
         }
-        
-        // 检查是否关注（这里有个小技巧：获取"我"的关注列表看该ID是否在其中）
-        // 注意：你的后端 getFollowingList 返回的是 List<String>，如果是 ID 字符串列表则可以直接对比
-        // 如果是用户名列表，对比会比较麻烦。这里假设我们尝试先不判断，点击时直接调接口
-        // 为了严谨，建议后端增加一个 endpoint: /is-following/{id} 
-      } catch (err) {
-        console.error(err);
-      } finally {
+      
         setLoading(false);
-      }
     };
     fetchData();
   }, [userId]);
 
   const handleFollow = async () => {
-    try {
-      await api.post(`/follow/${userId}`);
-      setIsFollowing(true);
-      // 更新粉丝数显示
-      if (user) setUser({ ...user, followerCount: user.followerCount + 1 });
-    } catch (err) {
-      alert('关注失败');
-    }
+      const res = await api.post<ApiResponse<string>>(`/follow/${userId}`);
+      
+      // 获取后端消息
+      const serverMsg = res.data.message;
+
+      if (res.data.code === 0) {
+        setIsFollowing(true);
+        // 更新粉丝数显示
+        if (user) setUser({ ...user, followerCount: user.followerCount + 1 });
+        
+        // 使用 react-hot-toast 显示成功
+        toast.success(serverMsg);
+      } else {
+        // 业务错误
+        toast.error(serverMsg);
+      }
   };
 
   const handleUnfollow = async () => {
-    try {
-      await api.delete(`/follow/${userId}`);
-      setIsFollowing(false);
-      if (user) setUser({ ...user, followerCount: user.followerCount - 1 });
-    } catch (err) {
-      alert('取关失败');
-    }
+      const res = await api.delete<ApiResponse<string>>(`/follow/${userId}`);
+      
+      const serverMsg = res.data.data || 'Unfollowed successfully';
+
+      if (res.data.code === 0) {
+        setIsFollowing(false);
+        if (user) setUser({ ...user, followerCount: user.followerCount - 1 });
+        
+        toast.success(serverMsg);
+      } else {
+        toast.error(serverMsg);
+      }
   };
 
-  if (loading) return <div className="p-10 text-center">加载中...</div>;
-  if (!user) return <div className="p-10 text-center">用户不存在</div>;
+  if (loading) return <div className="p-10 text-center">Loading...</div>;
+  if (!user) return <div className="p-10 text-center">User not found</div>;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -75,39 +83,39 @@ export default function UserProfilePage({ params }: { params: Promise<{ id: stri
             <div className="flex justify-between items-start">
               <div>
                 <h1 className="text-2xl font-bold">{user.username}</h1>
-                <p className="text-gray-600 mt-2">{user.bio || '这个人很懒，什么都没写'}</p>
+                {/* Translated Bio Placeholder */}
+                <p className="text-gray-600 mt-2">{user.bio || 'No bio available.'}</p>
               </div>
               
-              {/* 关注/取关按钮 */}
+              {/* Follow/Unfollow Buttons */}
               <div className="flex space-x-2">
-                 {/* 注意：由于后端没提供"是否已关注"字段，这里初始状态可能不准，
-                     实际开发建议后端 UserResponse 增加 `boolean followed` 字段 */}
                 {!isFollowing ? (
                   <button 
                     onClick={handleFollow}
-                    className="flex items-center bg-orange-500 text-white px-4 py-2 rounded hover:bg-orange-600"
+                    className="flex items-center bg-orange-500 text-white px-4 py-2 rounded hover:bg-orange-600 transition-colors"
                   >
-                    <UserPlus size={16} className="mr-2"/> 关注
+                    <UserPlus size={16} className="mr-2"/> Follow
                   </button>
                 ) : (
                   <button 
                     onClick={handleUnfollow}
-                    className="flex items-center bg-gray-200 text-gray-700 px-4 py-2 rounded hover:bg-gray-300"
+                    className="flex items-center bg-gray-200 text-gray-700 px-4 py-2 rounded hover:bg-gray-300 transition-colors"
                   >
-                    <UserMinus size={16} className="mr-2"/> 已关注
+                    <UserMinus size={16} className="mr-2"/> Following
                   </button>
                 )}
               </div>
             </div>
             
+            {/* Stats Translated */}
             <div className="flex space-x-8 mt-6">
               <div className="text-center">
                 <div className="font-bold text-lg">{user.followCount}</div>
-                <div className="text-gray-500 text-sm">关注</div>
+                <div className="text-gray-500 text-sm">Following</div>
               </div>
               <div className="text-center">
                 <div className="font-bold text-lg">{user.followerCount}</div>
-                <div className="text-gray-500 text-sm">粉丝</div>
+                <div className="text-gray-500 text-sm">Followers</div>
               </div>
             </div>
           </div>

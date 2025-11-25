@@ -3,14 +3,8 @@ import React, { JSX, useState } from 'react';
 import api from '@/lib/api';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ApiResponse } from '@/types';
+import { ApiResponse, RegisterRequest } from '@/types';
 import toast from 'react-hot-toast';
-
-interface RegisterRequest {
-  username: string;
-  email: string;
-  password: string;
-}
 
 export default function RegisterPage(): JSX.Element {
   const [formData, setFormData] = useState<RegisterRequest>({
