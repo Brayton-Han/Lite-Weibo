@@ -2,6 +2,7 @@ package com.brayton.weibo.service;
 
 import com.brayton.weibo.config.security.JWTService;
 import com.brayton.weibo.dto.LoginRequest;
+import com.brayton.weibo.dto.LoginResponse;
 import com.brayton.weibo.dto.RegisterRequest;
 import com.brayton.weibo.dto.UserResponse;
 import com.brayton.weibo.entity.User;
@@ -39,7 +40,7 @@ public class UserService {
         userRepository.save(newUser);
     }
 
-    public String login(LoginRequest request) {
+    public LoginResponse login(LoginRequest request) {
 
         // 1. 查找用户
         Optional<User> userOptional = userRepository.findByUsername(request.getUsername());
@@ -53,7 +54,7 @@ public class UserService {
             throw new WeiboException(CommonErrorCode.INVALID_PASSWORD);
         }
 
-        return jWTService.generateToken(user.getId());
+        return new LoginResponse(jWTService.generateToken(user.getId()), user.getId().toString());
     }
 
     public UserResponse getUserInfoById(long id, long selfId) {
@@ -64,6 +65,16 @@ public class UserService {
         }
 
         return new UserResponse(userOptional.get(), followRepository.existsByFollowerIdAndFollowingId(selfId, id));
+    }
+    /* Don't need isFollowing attribute */
+    public UserResponse getUserInfoById(long id) {
+
+        Optional<User> userOptional = userRepository.findById(id);
+        if (userOptional.isEmpty()) {
+            throw new WeiboException(CommonErrorCode.USER_NOT_FOUND);
+        }
+
+        return new UserResponse(userOptional.get(), false);
     }
 
     public String getUsernameById(long id) {
@@ -94,6 +105,7 @@ public class UserService {
         }
 
         // 3. 更新其他基础信息
+        user.setAvatarUrl(info.getAvatarUrl());
         user.setGender(info.getGender());
         user.setBio(info.getBio());
         user.setBirthday(info.getBirthday());

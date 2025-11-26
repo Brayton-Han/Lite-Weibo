@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import api from '@/lib/api';
-import { ApiResponse } from '@/types';
+import { ApiResponse, LoginResponse } from '@/types';
 import { toast } from 'react-hot-toast';
 
 export default function LoginPage() {
@@ -16,15 +16,15 @@ export default function LoginPage() {
     e.preventDefault();
     setLoading(true);
     
-      const res = await api.post<ApiResponse<string>>('/login', formData);
+      const res = await api.post<ApiResponse<LoginResponse>>('/login', formData);
       const responseData = res.data;
 
       if (responseData.code === 0) {
-        const token = responseData.data;
+        const {token, id} = responseData.data;
         localStorage.setItem('token', token);
-        
+        localStorage.setItem('userId', id);
         toast.success('Login successful!'); 
-        router.push('/me');
+        router.push(`/user/${id}`);
       } else {
         // 调用全局配置的 Toast 显示错误
         toast.error(responseData.message || 'Login failed');

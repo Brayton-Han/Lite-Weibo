@@ -1,10 +1,7 @@
 package com.brayton.weibo.controller;
 
 import com.brayton.weibo.config.security.CustomUserDetails;
-import com.brayton.weibo.dto.ApiResponse;
-import com.brayton.weibo.dto.LoginRequest;
-import com.brayton.weibo.dto.RegisterRequest;
-import com.brayton.weibo.dto.UserResponse;
+import com.brayton.weibo.dto.*;
 import com.brayton.weibo.service.UserService;
 import jakarta.validation.Valid;
 import lombok.AllArgsConstructor;
@@ -26,28 +23,22 @@ public class UserController {
         return new ResponseEntity<>(ApiResponse.success("User registered successfully."), HttpStatus.CREATED);
     }
 
-    @PostMapping("/login") // 登录应该使用 POST 请求
+    @PostMapping("/login")
     public ResponseEntity<ApiResponse<?>> login(@Valid @RequestBody LoginRequest request) {
-        String message = userService.login(request);
-        return ResponseEntity.ok(ApiResponse.success(message));
-    }
-
-    @GetMapping("/me")
-    public ResponseEntity<ApiResponse<?>> getCurrentUserInfo(@AuthenticationPrincipal CustomUserDetails user) {
-        UserResponse userResponse = userService.getUserInfoById(user.getId(), user.getId());
-        return ResponseEntity.ok(ApiResponse.success(userResponse));
-    }
-
-    @PutMapping("/me")
-    public ResponseEntity<ApiResponse<?>> updateCurrentUserInfo(@AuthenticationPrincipal CustomUserDetails user, @RequestBody UserResponse info) {
-        userService.update(user.getId(), info);
-        return ResponseEntity.ok(ApiResponse.success("User info updated successfully."));
+        LoginResponse data = userService.login(request);
+        return ResponseEntity.ok(ApiResponse.success(data));
     }
 
     @GetMapping("user/{id}")
     public ResponseEntity<ApiResponse<?>> getUserById(@AuthenticationPrincipal CustomUserDetails self, @PathVariable long id) {
         UserResponse userResponse = userService.getUserInfoById(id, self.getId());
         return ResponseEntity.ok(ApiResponse.success(userResponse));
+    }
+
+    @PutMapping("/set")
+    public ResponseEntity<ApiResponse<?>> updateUserInfo(@AuthenticationPrincipal CustomUserDetails user, @RequestBody UserResponse info) {
+        userService.update(user.getId(), info);
+        return ResponseEntity.ok(ApiResponse.success("User info updated successfully."));
     }
 
     @GetMapping("/ping")

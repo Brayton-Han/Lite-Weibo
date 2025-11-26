@@ -1,12 +1,11 @@
 import UserProfileClient from '@/components/UserProfileClient';
 
-// Next.js 15+ compatible params handling
-export default async function UserPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function UserFollowersPage({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = await params;
   return (
     <UserProfileClient 
       viewedUserId={resolvedParams.id} 
-      activeTab="profile" 
+      activeTab="followers" 
     />
   );
 }

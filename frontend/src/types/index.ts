@@ -31,6 +31,10 @@ export interface LoginRequest {
   password: string;
 }
 
+export interface LoginResponse {
+  token: string;
+  id: string;
+}
 
 export interface RegisterRequest {
   username: string;

@@ -1,6 +1,8 @@
 package com.brayton.weibo.service;
 
+import com.brayton.weibo.dto.UserResponse;
 import com.brayton.weibo.entity.FollowRelation;
+import com.brayton.weibo.entity.User;
 import com.brayton.weibo.error.CommonErrorCode;
 import com.brayton.weibo.error.ErrorCode;
 import com.brayton.weibo.error.WeiboException;
@@ -43,26 +45,26 @@ public class FollowService {
         userRepository.decrementFollowCountById(followerId);
     }
 
-    public List<String> getFollowers(long id) {
+    public List<UserResponse> getFollowers(long id) {
         if (!userRepository.existsById(id)) {
             throw new WeiboException(CommonErrorCode.USER_NOT_FOUND);
         }
         List<FollowRelation> idList = followRepository.findByFollowingId(id);
-        List<String> followers = new ArrayList<>();
+        List<UserResponse> followers = new ArrayList<>();
         for (FollowRelation followRelation : idList) {
-            followers.add(userService.getUsernameById(followRelation.getFollowerId()));
+            followers.add(userService.getUserInfoById(followRelation.getFollowerId()));
         }
         return followers;
     }
 
-    public List<String> getFollowings(long id) {
+    public List<UserResponse> getFollowings(long id) {
         if (!userRepository.existsById(id)) {
             throw new WeiboException(CommonErrorCode.USER_NOT_FOUND);
         }
         List<FollowRelation> idList = followRepository.findByFollowerId(id);
-        List<String> followings = new ArrayList<>();
+        List<UserResponse> followings = new ArrayList<>();
         for (FollowRelation followRelation : idList) {
-            followings.add(userService.getUsernameById(followRelation.getFollowingId()));
+            followings.add(userService.getUserInfoById(followRelation.getFollowingId()));
         }
         return followings;
     }
