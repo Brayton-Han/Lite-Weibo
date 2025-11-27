@@ -41,3 +41,36 @@ export interface RegisterRequest {
   email: string;
   password: string;
 }
+
+export enum PostVisibility {
+  PUBLIC = 'PUBLIC',
+  PRIVATE = 'PRIVATE',
+  FOLLOWERS = 'FOLLOWERS',
+  FRIENDS = 'FRIENDS' // 假设你有这个选项
+}
+
+export interface Post {
+  id: number;
+  user: User; // 复用你现有的 User 类型
+  content: string;
+  images: string[];
+  visibility: PostVisibility;
+  liked: boolean;
+  likeCount: number;
+  commentCount: number;
+  createdAt: string; // Java LocalDateTime 序列化后通常是 ISO 字符串
+  updatedAt: string;
+}
+
+export interface CreatePostRequest {
+  content: string;
+  images: string[];
+  visibility: PostVisibility;
+}
+
+export interface Comment {
+  id: number;
+  user: User;
+  content: string;
+  createdAt: string;
+}

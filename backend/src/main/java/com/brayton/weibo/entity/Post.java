@@ -25,8 +25,9 @@ public class Post {
     private Long id;
 
     // 作者
-    @Column(nullable = false)
-    private Long userId;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id")
+    private User user;
 
     // 文本内容（支持富文本的话可以改成 TEXT 类型）
     @Column(columnDefinition = "TEXT", nullable = false)
