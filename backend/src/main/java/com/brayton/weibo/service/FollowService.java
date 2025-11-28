@@ -46,26 +46,38 @@ public class FollowService {
     }
 
     public List<UserResponse> getFollowers(long id) {
+
         if (!userRepository.existsById(id)) {
             throw new WeiboException(CommonErrorCode.USER_NOT_FOUND);
         }
-        List<FollowRelation> idList = followRepository.findByFollowingId(id);
-        List<UserResponse> followers = new ArrayList<>();
-        for (FollowRelation followRelation : idList) {
-            followers.add(userService.getUserInfoById(followRelation.getFollowerId()));
-        }
-        return followers;
+
+        return followRepository.findFollowerIds(id)
+                .stream()
+                .map(userService::getUserInfoById)
+                .toList();
     }
 
     public List<UserResponse> getFollowings(long id) {
+
         if (!userRepository.existsById(id)) {
             throw new WeiboException(CommonErrorCode.USER_NOT_FOUND);
         }
-        List<FollowRelation> idList = followRepository.findByFollowerId(id);
-        List<UserResponse> followings = new ArrayList<>();
-        for (FollowRelation followRelation : idList) {
-            followings.add(userService.getUserInfoById(followRelation.getFollowingId()));
+
+        return followRepository.findFollowingIds(id)
+                .stream()
+                .map(userService::getUserInfoById)
+                .toList();
+    }
+
+    public List<UserResponse> getFriends(long id) {
+
+        if (!userRepository.existsById(id)) {
+            throw new WeiboException(CommonErrorCode.USER_NOT_FOUND);
         }
-        return followings;
+
+        return followRepository.findFriendIds(id)
+                .stream()
+                .map(userService::getUserInfoById)
+                .toList();
     }
 }

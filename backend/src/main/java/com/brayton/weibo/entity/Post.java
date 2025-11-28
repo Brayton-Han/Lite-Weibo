@@ -1,6 +1,8 @@
 package com.brayton.weibo.entity;
 
 import com.brayton.weibo.common.ImagesConverter;
+import com.brayton.weibo.enums.PostStatus;
+import com.brayton.weibo.enums.PostVisibility;
 import jakarta.persistence.*;
 import jakarta.persistence.Table;
 import lombok.*;

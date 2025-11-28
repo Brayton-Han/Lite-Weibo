@@ -29,13 +29,15 @@ public class CommentService {
 
     private CommentResponse buildCommentResponse(Comment comment, Long currentUserId) {
 
-        boolean isFollowed = followRepository.existsByFollowerIdAndFollowingId(currentUserId, comment.getUser().getId());
+        boolean following = followRepository.existsByFollowerIdAndFollowingId(currentUserId, comment.getUser().getId());
+        boolean followed = followRepository.existsByFollowerIdAndFollowingId(comment.getUser().getId(), currentUserId);
+        int friendCount = followRepository.findFriendCountIds(currentUserId);
 
         return CommentResponse.builder()
                 .createdAt(comment.getCreatedAt())
                 .content(comment.getContent())
                 .id(comment.getId())
-                .user(new UserResponse(comment.getUser(), isFollowed))
+                .user(new UserResponse(comment.getUser(), following, followed, friendCount))
                 .build();
     }
 

@@ -64,7 +64,10 @@ public class UserService {
             throw new WeiboException(CommonErrorCode.USER_NOT_FOUND);
         }
 
-        return new UserResponse(userOptional.get(), followRepository.existsByFollowerIdAndFollowingId(selfId, id));
+        return new UserResponse(userOptional.get(),
+                followRepository.existsByFollowerIdAndFollowingId(selfId, id),
+                followRepository.existsByFollowerIdAndFollowingId(id, selfId),
+                followRepository.findFriendCountIds(id));
     }
     /* Don't need isFollowing attribute */
     public UserResponse getUserInfoById(long id) {
@@ -74,7 +77,8 @@ public class UserService {
             throw new WeiboException(CommonErrorCode.USER_NOT_FOUND);
         }
 
-        return new UserResponse(userOptional.get(), false);
+        return new UserResponse(userOptional.get(), false, false,
+                followRepository.findFriendCountIds(id));
     }
 
     public String getUsernameById(long id) {

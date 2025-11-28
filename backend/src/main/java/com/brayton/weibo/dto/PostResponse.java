@@ -1,6 +1,6 @@
 package com.brayton.weibo.dto;
 
-import com.brayton.weibo.entity.PostVisibility;
+import com.brayton.weibo.enums.PostVisibility;
 import lombok.Builder;
 import lombok.Data;
 

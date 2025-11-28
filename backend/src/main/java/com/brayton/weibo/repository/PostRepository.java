@@ -10,7 +10,9 @@ import java.util.List;
 
 public interface PostRepository extends JpaRepository<Post, Long> {
     // 根据作者查帖子（按时间倒序）
-    List<Post> findAllByUserIdOrderByCreatedAtDesc(Long userId);
+    List<Post> findByUserIdOrderByCreatedAtDesc(Long userId);
+
+    List<Post> findByUserIdInOrderByCreatedAtDesc(List<Long> userIds);
 
     // Cursor 分页用：查某用户的帖子，id < cursor，不用 offset，性能稳
     List<Post> findByUserIdAndIdLessThanOrderByIdDesc(Long userId, Long cursor);

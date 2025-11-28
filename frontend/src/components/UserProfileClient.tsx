@@ -5,62 +5,47 @@ import api from '@/lib/api';
 import { ApiResponse, User, Post } from '@/types';
 import { useRouter } from 'next/navigation';
 import { toast } from 'react-hot-toast';
-import { Layout, Users, Heart, UserPlus, UserMinus } from 'lucide-react';
-import PostCard from './PostCard'; // 確保路徑正確
-import CreatePostWidget from './CreatePostWidget'; // 確保路徑正確
+// 1. 引入 UserCheck 图标用于 Friends
+import { Layout, Users, Heart, UserPlus, UserMinus, UserCheck } from 'lucide-react'; // [!code ++]
+import PostCard from './PostCard'; 
+import CreatePostWidget from './CreatePostWidget'; 
+import Navbar from '@/components/Navbar'; 
 
 interface UserProfileClientProps {
-  viewedUserId: string; // 当前页面 URL 对应的 ID
-  activeTab: 'profile' | 'following' | 'followers'; // 当前页面类型
+  viewedUserId: string; 
+  // 2. 在类型定义中添加 'friends'
+  activeTab: 'profile' | 'following' | 'followers' | 'friends'; // [!code ++]
 }
 
 export default function UserProfileClient({ viewedUserId, activeTab }: UserProfileClientProps) {
   const router = useRouter();
 
-  // --- State: 当前登录用户 (Me) ---
   const [me, setMe] = useState<User | null>(null);
-  
-  // --- State: 当前查看的用户 (Viewed User) ---
   const [viewedUser, setViewedUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  
-  // --- State: 列表数据 (Following/Followers) ---
   const [listData, setListData] = useState<User[]>([]);
   const [listLoading, setListLoading] = useState(false);
-
-  // --- State: 帖子数据 (Posts) ---
   const [posts, setPosts] = useState<Post[]>([]);
-  // 如果需要单独的 loading 状态可以使用，这里暂时复用整体 loading 或不做处理
 
-  // 判断当前查看的是否是自己的主页
   const isOwnProfile = String(me?.id) === String(viewedUser?.id);
 
-  // 1. 初始化：获取 Me, Viewed User 和 Posts
   useEffect(() => {
     const initData = async () => {
       setLoading(true);
       try {
-        // 从 localStorage 获取当前登录用户的 ID
         const myId = localStorage.getItem('userId');
-
-        // 并行请求：
-        // 1. 获取“当前查看用户”的信息
-        // 2. 获取“我”的信息 (如果已登录)
-        // 3. 获取“当前查看用户”的帖子列表 [新增]
         const fetchViewedUser = api.get<ApiResponse<User>>(`/user/${viewedUserId}`);
         const fetchMe = myId ? api.get<ApiResponse<User>>(`/user/${myId}`) : Promise.resolve(null);
         const fetchPosts = api.get<ApiResponse<Post[]>>(`/user/${viewedUserId}/posts`);
 
         const [userRes, meRes, postsRes] = await Promise.allSettled([fetchViewedUser, fetchMe, fetchPosts]);
 
-        // 处理 Viewed User
         if (userRes.status === 'fulfilled' && userRes.value.data.code === 0) {
           setViewedUser(userRes.value.data.data);
         } else {
           toast.error('Failed to load user profile');
         }
 
-        // 处理 Me
         if (meRes.status === 'fulfilled' && meRes.value) {
            const res = meRes.value; 
            if (res && res.data && res.data.code === 0) {
@@ -68,7 +53,6 @@ export default function UserProfileClient({ viewedUserId, activeTab }: UserProfi
            }
         }
 
-        // 处理 Posts [新增]
         if (postsRes.status === 'fulfilled' && postsRes.value.data.code === 0) {
           setPosts(postsRes.value.data.data);
         }
@@ -80,24 +64,27 @@ export default function UserProfileClient({ viewedUserId, activeTab }: UserProfi
         setLoading(false);
       }
     };
-
     initData();
   }, [viewedUserId]);
 
-  // 2. 根据 Tab 加载列表数据 (Following/Followers)
+  // 3. 修改列表获取逻辑，增加 friends 处理
   useEffect(() => {
     if (activeTab === 'profile') return;
 
     const fetchList = async () => {
       setListLoading(true);
       try {
-        const url = activeTab === 'following' 
-          ? `/user/${viewedUserId}/following` 
-          : `/user/${viewedUserId}/followers`;
+        // [!code ++] 根据 activeTab 动态决定 URL
+        let url = '';
+        if (activeTab === 'following') url = `/user/${viewedUserId}/following`;
+        else if (activeTab === 'followers') url = `/user/${viewedUserId}/followers`;
+        else if (activeTab === 'friends') url = `/user/${viewedUserId}/friends`; // 新增接口调用
           
-        const res = await api.get<ApiResponse<User[]>>(url);
-        if (res.data.code === 0) {
-          setListData(res.data.data);
+        if (url) {
+          const res = await api.get<ApiResponse<User[]>>(url);
+          if (res.data.code === 0) {
+            setListData(res.data.data);
+          }
         }
       } catch (error) {
         toast.error('Failed to fetch list');
@@ -109,8 +96,8 @@ export default function UserProfileClient({ viewedUserId, activeTab }: UserProfi
     if (viewedUserId) fetchList();
   }, [activeTab, viewedUserId]);
 
-  // --- Handlers: Sidebar Navigation ---
-  const handleMyNav = (tab: 'profile' | 'following' | 'followers') => {
+  // 4. 修改侧边栏点击处理
+  const handleMyNav = (tab: 'profile' | 'following' | 'followers' | 'friends') => { // [!code ++]
     if (!me) {
       toast.error("Please login first");
       router.push('/login');
@@ -120,12 +107,16 @@ export default function UserProfileClient({ viewedUserId, activeTab }: UserProfi
     if (tab === 'profile') router.push(baseUrl);
     if (tab === 'following') router.push(`${baseUrl}/following`);
     if (tab === 'followers') router.push(`${baseUrl}/followers`);
+    if (tab === 'friends') router.push(`${baseUrl}/friends`); // [!code ++]
   };
 
-  // --- Handlers: Profile Actions ---
   const handleFollowToggle = async () => {
     if (!viewedUser) return;
+    
+    // 获取当前状态
     const isFollowing = (viewedUser as any).following; 
+    const isFollowedByTarget = (viewedUser as any).followed; // 获取对方是否关注了我
+    
     const url = `/follow/${viewedUserId}`;
     
     try {
@@ -135,11 +126,24 @@ export default function UserProfileClient({ viewedUserId, activeTab }: UserProfi
 
       if (res.data.code === 0) {
         toast.success(isFollowing ? 'Unfollowed' : 'Followed');
-        setViewedUser(prev => prev ? ({
-          ...prev,
-          following: !isFollowing,
-          followerCount: prev.followerCount + (isFollowing ? -1 : 1)
-        } as any) : null);
+        
+        setViewedUser(prev => {
+          if (!prev) return null;
+          
+          // 计算好友数量的变化量
+          // 只有当对方也关注了我(isFollowedByTarget为true)时，我的关注操作才会改变好友状态
+          // isFollowing 为 true (代表正在取消关注) -> 减少好友
+          // isFollowing 为 false (代表正在关注) -> 增加好友
+          const friendChange = isFollowedByTarget ? (isFollowing ? -1 : 1) : 0;
+
+          return {
+            ...prev,
+            following: !isFollowing,
+            followerCount: prev.followerCount + (isFollowing ? -1 : 1),
+            // [!code ++] 动态更新 friendCount
+            friendCount: prev.friendCount + friendChange 
+          } as any; // 保持原有类型断言风格
+        });
       } else {
         toast.error(res.data.message);
       }
@@ -158,7 +162,6 @@ export default function UserProfileClient({ viewedUserId, activeTab }: UserProfi
     if (me) router.push('/set');
   };
 
-  // --- Handlers: Post Actions [新增] ---
   const handlePostCreated = (newPost: Post) => {
     setPosts([newPost, ...posts]);
   };
@@ -167,7 +170,6 @@ export default function UserProfileClient({ viewedUserId, activeTab }: UserProfi
     setPosts(posts.filter(p => p.id !== postId));
   };
 
-  // --- Render Helpers ---
   const getSidebarItemClass = (targetTab: string) => {
     const isActive = isOwnProfile && activeTab === targetTab;
     const baseClass = "flex items-center w-full px-4 py-3 text-sm font-medium rounded-lg transition-colors duration-200 cursor-pointer mb-1";
@@ -206,11 +208,9 @@ export default function UserProfileClient({ viewedUserId, activeTab }: UserProfi
     );
   };
 
-  // --- Render Profile Content (包含发帖框和帖子列表) ---
   const renderProfileContent = () => {
     return (
       <div className="space-y-6">
-        {/* 1. 用户信息卡片 */}
         <div className="bg-white rounded-xl shadow overflow-hidden animate-in fade-in duration-300">
           <div className="h-32 bg-blue-600"></div>
           <div className="px-6 pb-6">
@@ -250,6 +250,7 @@ export default function UserProfileClient({ viewedUserId, activeTab }: UserProfi
               </div>
               
               <div className="flex items-center gap-6 pb-1">
+                {/* Following Count */}
                 <div 
                   className="cursor-pointer hover:text-blue-600 transition-colors flex items-baseline gap-1" 
                   onClick={() => router.push(`/user/${viewedUserId}/following`)}
@@ -257,12 +258,22 @@ export default function UserProfileClient({ viewedUserId, activeTab }: UserProfi
                   <span className="text-lg font-bold text-gray-900">{viewedUser!.followCount}</span>
                   <span className="text-sm text-gray-500">Following</span>
                 </div>
+                {/* Followers Count */}
                 <div 
                   className="cursor-pointer hover:text-blue-600 transition-colors flex items-baseline gap-1"
                   onClick={() => router.push(`/user/${viewedUserId}/followers`)}
                 >
                   <span className="text-lg font-bold text-gray-900">{viewedUser!.followerCount}</span>
                   <span className="text-sm text-gray-500">Followers</span>
+                </div>
+                {/* Friends Count (New) */}
+                {/* 5. [!code ++] 新增 Friends 数量显示 */}
+                <div 
+                  className="cursor-pointer hover:text-blue-600 transition-colors flex items-baseline gap-1"
+                  onClick={() => router.push(`/user/${viewedUserId}/friends`)}
+                >
+                  <span className="text-lg font-bold text-gray-900">{viewedUser!.friendCount}</span>
+                  <span className="text-sm text-gray-500">Friends</span>
                 </div>
               </div>
             </div>
@@ -274,20 +285,24 @@ export default function UserProfileClient({ viewedUserId, activeTab }: UserProfi
           </div>
         </div>
 
-        {/* 2. 发帖框 (仅限本人) */}
         {isOwnProfile && (
           <CreatePostWidget onPostCreated={handlePostCreated} />
         )}
 
-        {/* 3. 帖子列表 */}
         <div>
-          <h3 className="text-lg font-bold text-gray-900 mb-4 px-1">Posts</h3>
+          <h3 className="text-lg font-bold text-gray-900 mb-4 px-1">Posts ({posts.length})</h3>
           {posts.length === 0 ? (
             <div className="bg-white rounded-xl p-8 text-center text-gray-500 shadow">
               <p>No posts yet.</p>
             </div>
           ) : (
-            posts.map(post => (
+            posts.filter(post => {
+              if (isOwnProfile) return true;
+              if (post.visibility === 'PUBLIC') return true;
+              if (post.visibility === 'FOLLOWERS' && (viewedUser as any).following) return true;
+              if (post.visibility === 'FRIENDS' && (viewedUser as any).following && (viewedUser as any).followed) return true;
+              return false;
+            }).map(post => (
               <PostCard 
                 key={post.id} 
                 post={post} 
@@ -301,52 +316,69 @@ export default function UserProfileClient({ viewedUserId, activeTab }: UserProfi
     );
   };
 
-  // --- Main Render Logic ---
-  if (loading) return <div className="p-10 text-center">Loading profile...</div>;
-  if (!viewedUser) return <div className="p-10 text-center">User not found</div>;
+  // 6. 辅助函数：获取列表标题
+  const getListTitle = () => { // [!code ++]
+    if (activeTab === 'following') return 'Following';
+    if (activeTab === 'followers') return 'Followers';
+    if (activeTab === 'friends') return 'Friends';
+    return '';
+  };
 
   return (
-    <div className="min-h-screen bg-gray-50 py-10">
-      <div className="max-w-6xl mx-auto px-4 flex flex-col md:flex-row gap-6">
-        
-        {/* Sidebar */}
-        <aside className="w-full md:w-64 flex-shrink-0">
-          <div className="bg-white rounded-xl shadow p-4 sticky top-4">
-            <h2 className="px-4 pb-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">My Account</h2>
-            <nav className="space-y-1">
-              <button onClick={() => handleMyNav('profile')} className={getSidebarItemClass('profile')}>
-                <Layout size={18} className="mr-3" />
-                My Profile
-              </button>
-              <button onClick={() => handleMyNav('following')} className={getSidebarItemClass('following')}>
-                <Users size={18} className="mr-3" />
-                My Following
-              </button>
-              <button onClick={() => handleMyNav('followers')} className={getSidebarItemClass('followers')}>
-                <Heart size={18} className="mr-3" />
-                My Followers
-              </button>
-            </nav>
-          </div>
-        </aside>
+    <>
+      <Navbar />
 
-        {/* Main Content */}
-        <main className="w-full max-w-2xl">
-          {activeTab === 'profile' ? (
-            renderProfileContent()
-          ) : (
-            // List View Container
-            <div className="bg-white rounded-xl shadow overflow-hidden min-h-[400px] animate-in fade-in duration-300">
-              <div className="px-6 py-4 border-b border-gray-100">
-                <h3 className="text-lg font-bold text-gray-900">
-                  {activeTab === 'following' ? 'Following' : 'Followers'}
-                </h3>
+      <div className="min-h-screen bg-gray-50 pt-20 pb-10">
+        
+        {loading ? (
+           <div className="p-10 text-center">Loading profile...</div>
+        ) : !viewedUser ? (
+           <div className="p-10 text-center">User not found</div>
+        ) : (
+          <div className="max-w-6xl mx-auto px-4 flex flex-col md:flex-row gap-6">
+            
+            <aside className="w-full md:w-64 flex-shrink-0">
+              <div className="bg-white rounded-xl shadow p-4 sticky top-24">
+                <h2 className="px-4 pb-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">My Account</h2>
+                <nav className="space-y-1">
+                  <button onClick={() => handleMyNav('profile')} className={getSidebarItemClass('profile')}>
+                    <Layout size={18} className="mr-3" />
+                    My Profile
+                  </button>
+                  <button onClick={() => handleMyNav('following')} className={getSidebarItemClass('following')}>
+                    <Users size={18} className="mr-3" />
+                    My Following
+                  </button>
+                  <button onClick={() => handleMyNav('followers')} className={getSidebarItemClass('followers')}>
+                    <Heart size={18} className="mr-3" />
+                    My Followers
+                  </button>
+                  {/* 7. [!code ++] 侧边栏增加 My Friends */}
+                  <button onClick={() => handleMyNav('friends')} className={getSidebarItemClass('friends')}>
+                    <UserCheck size={18} className="mr-3" />
+                    My Friends
+                  </button>
+                </nav>
               </div>
-              {renderUserList()}
-            </div>
-          )}
-        </main>
+            </aside>
+
+            <main className="w-full max-w-2xl">
+              {activeTab === 'profile' ? (
+                renderProfileContent()
+              ) : (
+                <div className="bg-white rounded-xl shadow overflow-hidden min-h-[400px] animate-in fade-in duration-300">
+                  <div className="px-6 py-4 border-b border-gray-100">
+                    <h3 className="text-lg font-bold text-gray-900">
+                      {getListTitle()} {/* [!code ++] 使用动态标题 */}
+                    </h3>
+                  </div>
+                  {renderUserList()}
+                </div>
+              )}
+            </main>
+          </div>
+        )}
       </div>
-    </div>
+    </>
   );
 }

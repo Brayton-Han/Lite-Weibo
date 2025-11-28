@@ -1,5 +1,6 @@
 package com.brayton.weibo.entity;
 
+import com.brayton.weibo.enums.Gender;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;

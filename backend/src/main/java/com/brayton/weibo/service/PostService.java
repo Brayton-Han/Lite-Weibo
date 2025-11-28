@@ -34,11 +34,13 @@ public class PostService {
     private PostResponse buildPostResponse(Post post, Long currentUserId) {
         User author = post.getUser();
         boolean isLiked = likeRepository.existsByUserIdAndPostId(currentUserId, post.getId());
-        boolean isFollowed = followRepository.existsByFollowerIdAndFollowingId(currentUserId, author.getId());
+        boolean following = followRepository.existsByFollowerIdAndFollowingId(currentUserId, author.getId());
+        boolean followed = followRepository.existsByFollowerIdAndFollowingId(author.getId(), currentUserId);
+        int friendCount = followRepository.findFriendCountIds(author.getId());
 
         return PostResponse.builder()
                 .id(post.getId())
-                .user(new UserResponse(author, isFollowed))
+                .user(new UserResponse(author, following, followed, friendCount))
                 .content(post.getContent())
                 .images(post.getImages())
                 .visibility(post.getVisibility())
@@ -74,8 +76,38 @@ public class PostService {
     public List<PostResponse> getAllPosts(Long userId, Long currentUserId) {
 
         // 查这个用户的所有帖子
-        List<Post> posts = postRepository.findAllByUserIdOrderByCreatedAtDesc(userId);
+        List<Post> posts = postRepository.findByUserIdOrderByCreatedAtDesc(userId);
 
+        return posts.stream()
+                .map(post -> buildPostResponse(post, currentUserId))
+                .toList();
+    }
+
+    public List<PostResponse> getNewestFeed(Long currentUserId) {
+
+        // 1. 查我关注的所有用户 ID
+        List<Long> followingIds = followRepository.findFollowingIds(currentUserId);
+        followingIds.add(currentUserId);
+
+        // 2. 查这些用户发的所有帖子（按创建时间倒序）
+        List<Post> posts = postRepository.findByUserIdInOrderByCreatedAtDesc(followingIds);
+
+        // 3. 转成 DTO
+        return posts.stream()
+                .map(post -> buildPostResponse(post, currentUserId))
+                .toList();
+    }
+
+    public List<PostResponse> getFriendPosts(Long currentUserId) {
+
+        // 1. 查我关注的所有用户 ID
+        List<Long> friendIds = followRepository.findFriendIds(currentUserId);
+        //friendIds.add(currentUserId);
+
+        // 2. 查这些用户发的所有帖子（按创建时间倒序）
+        List<Post> posts = postRepository.findByUserIdInOrderByCreatedAtDesc(friendIds);
+
+        // 3. 转成 DTO
         return posts.stream()
                 .map(post -> buildPostResponse(post, currentUserId))
                 .toList();

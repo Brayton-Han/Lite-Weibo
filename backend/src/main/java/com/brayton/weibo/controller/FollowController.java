@@ -32,6 +32,12 @@ public class FollowController {
         return ResponseEntity.ok(ApiResponse.success(followerList));
     }
 
+    @GetMapping("user/{id}/friends")
+    public ResponseEntity<ApiResponse<?>> getFriendsList(@PathVariable long id) {
+        List<UserResponse> friendsList = followService.getFriends(id);
+        return ResponseEntity.ok(ApiResponse.success(friendsList));
+    }
+
     @PostMapping("/follow/{id}")
     public ResponseEntity<ApiResponse<?>> follow(@AuthenticationPrincipal CustomUserDetails me, @PathVariable long id) {
         followService.follow(me.getId(), id);

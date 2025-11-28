@@ -33,6 +33,18 @@ public class PostController {
         return ResponseEntity.ok(ApiResponse.success("Successfully deleted post"));
     }
 
+    @GetMapping("/posts")
+    public ResponseEntity<ApiResponse<?>> getNewestFeed(@AuthenticationPrincipal CustomUserDetails self) {
+        List<PostResponse> posts = postService.getNewestFeed(self.getId());
+        return ResponseEntity.ok(ApiResponse.success(posts));
+    }
+
+    @GetMapping("/posts/friends")
+    public ResponseEntity<ApiResponse<?>> getFriendPosts(@AuthenticationPrincipal CustomUserDetails self) {
+        List<PostResponse> posts = postService.getFriendPosts(self.getId());
+        return ResponseEntity.ok(ApiResponse.success(posts));
+    }
+
     @PostMapping("/posts")
     public ResponseEntity<ApiResponse<?>> post(@AuthenticationPrincipal CustomUserDetails user, @RequestBody CreatePostRequest post) {
         PostResponse newPost = postService.createPost(user.getId(), post);

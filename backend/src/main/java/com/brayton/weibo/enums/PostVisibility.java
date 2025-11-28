@@ -1,4 +1,4 @@
-package com.brayton.weibo.entity;
+package com.brayton.weibo.enums;
 
 public enum PostVisibility {
     PUBLIC,
