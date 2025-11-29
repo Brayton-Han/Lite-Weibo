@@ -19,22 +19,24 @@ export default function PostCard({ post, currentUserId, onDelete }: PostCardProp
   const [likeCount, setLikeCount] = useState(post.likeCount);
   const [isLikeLoading, setIsLikeLoading] = useState(false);
 
-  // --- State: Delete Modal ---
+  // --- State: Delete Post Modal ---
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
   // --- State: Comments ---
-  const [showCommentBox, setShowCommentBox] = useState(false); // 控制評論區展開/收起
-  const [commentText, setCommentText] = useState('');          // 輸入框內容
-  const [isPostingComment, setIsPostingComment] = useState(false); // 發布中狀態
+  const [showCommentBox, setShowCommentBox] = useState(false);
+  const [commentText, setCommentText] = useState('');
+  const [isPostingComment, setIsPostingComment] = useState(false);
   const [commentCount, setCommentCount] = useState(post.commentCount);
   
-  // 評論列表數據
   const [comments, setComments] = useState<Comment[]>([]);
   const [commentsLoading, setCommentsLoading] = useState(false);
-  const [commentsLoaded, setCommentsLoaded] = useState(false); // 標記是否已加載過
+  const [commentsLoaded, setCommentsLoaded] = useState(false);
 
-  // 判断是否是作者
+  // --- State: Delete Comment Modal (新增) ---
+  const [commentToDelete, setCommentToDelete] = useState<number | null>(null); // 存储待删除的评论ID，非null即显示弹窗
+  const [isDeletingComment, setIsDeletingComment] = useState(false);
+
   const isAuthor = String(post.user?.id) === String(currentUserId);
 
   // --- Handlers: Like Logic ---
@@ -45,7 +47,6 @@ export default function PostCard({ post, currentUserId, onDelete }: PostCardProp
     }
     if (isLikeLoading) return;
 
-    // 樂觀更新
     const previousLiked = liked;
     const previousCount = likeCount;
     
@@ -61,7 +62,6 @@ export default function PostCard({ post, currentUserId, onDelete }: PostCardProp
         await api.delete(`/posts/${post.id}/like`);
       }
     } catch (error) {
-      // 失敗回滾
       setLiked(previousLiked);
       setLikeCount(previousCount);
       toast.error("Failed to update like status");
@@ -70,15 +70,15 @@ export default function PostCard({ post, currentUserId, onDelete }: PostCardProp
     }
   };
 
-  // --- Handlers: Delete Logic ---
-  const confirmDelete = async () => {
+  // --- Handlers: Delete Post Logic ---
+  const confirmDeletePost = async () => {
     setIsDeleting(true);
     try {
       const res = await api.delete(`/posts/${post.id}`);
       if (res.data.code === 0) {
         toast.success("Post deleted successfully");
         setShowDeleteModal(false);
-        onDelete(post.id); // 通知父組件移除
+        onDelete(post.id);
       } else {
         toast.error(res.data.message || "Failed to delete");
       }
@@ -90,11 +90,8 @@ export default function PostCard({ post, currentUserId, onDelete }: PostCardProp
   };
 
   // --- Handlers: Comment Logic ---
-  
-  // 1. 加載評論列表
   const loadComments = async () => {
     if (commentsLoaded) return;
-    
     setCommentsLoading(true);
     try {
       const res = await api.get(`/posts/${post.id}/comments`);
@@ -109,18 +106,14 @@ export default function PostCard({ post, currentUserId, onDelete }: PostCardProp
     }
   };
 
-  // 2. 切換評論區顯示狀態
   const toggleCommentSection = () => {
     const newState = !showCommentBox;
     setShowCommentBox(newState);
-    
-    // 如果是展開操作，並且還沒加載過評論，則去加載
     if (newState && !commentsLoaded) {
       loadComments();
     }
   };
 
-  // 3. 發布評論
   const handlePublishComment = async () => {
     if (!currentUserId) {
       toast.error("Please login to comment");
@@ -139,12 +132,9 @@ export default function PostCard({ post, currentUserId, onDelete }: PostCardProp
 
       if (res.data.code === 0) {
         toast.success("Comment published!");
-        setCommentText(''); // 清空輸入框
+        setCommentText('');
         setCommentCount(prev => prev + 1);
         
-        // 重新加載評論列表以顯示最新評論
-        setCommentsLoaded(false);
-        // 這裡可以選擇直接 push 到數組，也可以重新 fetch，重新 fetch 最保險
         const listRes = await api.get(`/posts/${post.id}/comments`);
         if(listRes.data.code === 0) {
             setComments(listRes.data.data);
@@ -160,12 +150,43 @@ export default function PostCard({ post, currentUserId, onDelete }: PostCardProp
     }
   };
 
+  // --- Handlers: Delete Comment Logic (修改) ---
+  
+  // 1. 点击删除图标，打开弹窗
+  const openDeleteCommentModal = (commentId: number) => {
+    setCommentToDelete(commentId);
+  };
+
+  // 2. 确认删除评论
+  const confirmDeleteComment = async () => {
+    if (commentToDelete === null) return;
+
+    setIsDeletingComment(true);
+    try {
+      const res = await api.delete(`/comments/${commentToDelete}`);
+      
+      if (res.data.code === 0) {
+        toast.success("Comment deleted");
+        // 更新本地状态
+        setComments((prev) => prev.filter((c) => c.id !== commentToDelete));
+        setCommentCount((prev) => prev - 1);
+        // 关闭弹窗
+        setCommentToDelete(null); 
+      } else {
+        toast.error(res.data.message || "Failed to delete comment");
+      }
+    } catch (error) {
+      toast.error("Network error");
+    } finally {
+      setIsDeletingComment(false);
+    }
+  };
+
   // --- Render Helpers ---
   const renderImages = () => {
     if (!post.images || post.images.length === 0) return null;
     const count = post.images.length;
 
-    // 單圖優化：自適應高度
     if (count === 1) {
       return (
         <div className="mt-3 rounded-lg overflow-hidden bg-gray-100 border border-gray-100">
@@ -178,7 +199,6 @@ export default function PostCard({ post, currentUserId, onDelete }: PostCardProp
       );
     }
 
-    // 多圖網格
     let gridClass = 'grid gap-1 mt-3 rounded-lg overflow-hidden';
     if (count === 2) gridClass += ' grid-cols-2';
     else if (count >= 3) gridClass += ' grid-cols-3';
@@ -219,7 +239,6 @@ export default function PostCard({ post, currentUserId, onDelete }: PostCardProp
             </div>
           </div>
           
-          {/* 刪除按鈕 (僅作者可見) */}
           {isAuthor && (
             <button 
               onClick={() => setShowDeleteModal(true)} 
@@ -262,11 +281,10 @@ export default function PostCard({ post, currentUserId, onDelete }: PostCardProp
           </button>
         </div>
 
-        {/* --- Comment Section (輸入框 + 列表) --- */}
+        {/* --- Comment Section --- */}
         {showCommentBox && (
           <div className="mt-4 border-t border-gray-50 pt-4 animate-in fade-in slide-in-from-top-2 duration-200">
             
-            {/* 1. 輸入框 */}
             <div className="relative mb-6">
               <textarea
                 value={commentText}
@@ -286,35 +304,58 @@ export default function PostCard({ post, currentUserId, onDelete }: PostCardProp
               </div>
             </div>
 
-            {/* 2. 評論列表 */}
             <div className="space-y-4">
               {commentsLoading ? (
                 <div className="text-center text-gray-400 text-sm py-2">Loading comments...</div>
               ) : comments.length > 0 ? (
-                comments.map((comment) => (
-                  <div key={comment.id} className="flex gap-3 animate-in fade-in duration-300">
-                    <Link href={`/user/${comment.user.id}`}>
-                      <img 
-                        src={comment.user.avatarUrl || "/default-avatar.png"} 
-                        alt={comment.user.username}
-                        className="w-8 h-8 rounded-full object-cover cursor-pointer mt-1" 
-                      />
-                    </Link>
-                    <div className="flex-1 bg-gray-50 rounded-lg p-3">
-                      <div className="flex justify-between items-baseline mb-1">
-                        <Link href={`/user/${comment.user.id}`}>
-                          <span className="font-semibold text-sm text-gray-900 hover:underline cursor-pointer">
-                            {comment.user.username}
-                          </span>
-                        </Link>
-                        <span className="text-xs text-gray-400">
-                          {new Date(comment.createdAt).toLocaleDateString()}
-                        </span>
+                comments.map((comment) => {
+                  const isCommentAuthor = String(comment.user.id) === String(currentUserId);
+
+                  return (
+                    <div key={comment.id} className="flex gap-3 animate-in fade-in duration-300 group">
+                      <Link href={`/user/${comment.user.id}`}>
+                        <img 
+                          src={comment.user.avatarUrl || "/default-avatar.png"} 
+                          alt={comment.user.username}
+                          className="w-8 h-8 rounded-full object-cover cursor-pointer mt-1" 
+                        />
+                      </Link>
+                      <div className="flex-1 bg-gray-50 rounded-lg p-3 relative">
+                        <div className="flex justify-between items-baseline mb-1">
+                          <Link href={`/user/${comment.user.id}`}>
+                            <span className="font-semibold text-sm text-gray-900 hover:underline cursor-pointer">
+                              {comment.user.username}
+                            </span>
+                          </Link>
+                          
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-gray-400">
+                              {new Date(comment.createdAt).toLocaleString([], {
+                                year: 'numeric',
+                                month: '2-digit',
+                                day: '2-digit',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                                hour12: false
+                              })}
+                            </span>
+                            
+                            {isCommentAuthor && (
+                              <button
+                                onClick={() => openDeleteCommentModal(comment.id)} // 修改：触发弹窗
+                                className="text-gray-400 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
+                                title="Delete comment"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        <p className="text-sm text-gray-700 whitespace-pre-wrap">{comment.content}</p>
                       </div>
-                      <p className="text-sm text-gray-700 whitespace-pre-wrap">{comment.content}</p>
                     </div>
-                  </div>
-                ))
+                  );
+                })
               ) : (
                 <div className="text-center text-gray-400 text-sm py-4">No comments yet.</div>
               )}
@@ -324,7 +365,7 @@ export default function PostCard({ post, currentUserId, onDelete }: PostCardProp
         )}
       </div>
 
-      {/* --- Delete Modal (自定義彈窗) --- */}
+      {/* --- Delete Post Modal --- */}
       {showDeleteModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 animate-in fade-in duration-200">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden scale-100 animate-in zoom-in-95 duration-200">
@@ -340,7 +381,7 @@ export default function PostCard({ post, currentUserId, onDelete }: PostCardProp
             <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse gap-2">
               <button
                 type="button"
-                onClick={confirmDelete}
+                onClick={confirmDeletePost}
                 disabled={isDeleting}
                 className="w-full inline-flex justify-center rounded-lg border border-transparent shadow-sm px-4 py-2 bg-red-600 text-base font-medium text-white hover:bg-red-700 focus:outline-none sm:ml-3 sm:w-auto sm:text-sm disabled:opacity-50"
               >
@@ -349,6 +390,40 @@ export default function PostCard({ post, currentUserId, onDelete }: PostCardProp
               <button
                 type="button"
                 onClick={() => setShowDeleteModal(false)}
+                className="mt-3 w-full inline-flex justify-center rounded-lg border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- Delete Comment Modal (新增：样式与 Post Modal 一致) --- */}
+      {commentToDelete !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden scale-100 animate-in zoom-in-95 duration-200">
+            <div className="p-6 text-center">
+              <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-red-100 mb-4">
+                <AlertCircle className="h-6 w-6 text-red-600" />
+              </div>
+              <h3 className="text-lg font-medium text-gray-900">Delete Comment?</h3>
+              <p className="text-sm text-gray-500 mt-2">
+                Are you sure you want to delete this comment? This action cannot be undone.
+              </p>
+            </div>
+            <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse gap-2">
+              <button
+                type="button"
+                onClick={confirmDeleteComment}
+                disabled={isDeletingComment}
+                className="w-full inline-flex justify-center rounded-lg border border-transparent shadow-sm px-4 py-2 bg-red-600 text-base font-medium text-white hover:bg-red-700 focus:outline-none sm:ml-3 sm:w-auto sm:text-sm disabled:opacity-50"
+              >
+                {isDeletingComment ? 'Deleting...' : 'Delete'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setCommentToDelete(null)}
                 className="mt-3 w-full inline-flex justify-center rounded-lg border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm"
               >
                 Cancel

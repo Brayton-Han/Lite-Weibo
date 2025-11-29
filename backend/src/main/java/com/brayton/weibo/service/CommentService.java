@@ -17,6 +17,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Optional;
 
 @Service
 @RequiredArgsConstructor
@@ -51,6 +52,7 @@ public class CommentService {
 
     @Transactional
     public void createComment(Long userId, Long postId, String content) {
+
         Post post = postRepository.findById(postId)
                 .orElseThrow(() -> new WeiboException(CommonErrorCode.POST_NOT_FOUND));
 
@@ -65,5 +67,19 @@ public class CommentService {
 
         commentRepository.save(comment);
         postRepository.incrementCommentCount(postId);
+    }
+
+    @Transactional
+    public void deleteComment(Long commentId, Long userId) {
+
+        Comment comment = commentRepository.findById(commentId)
+                .orElseThrow(() -> new WeiboException(CommonErrorCode.COMMENT_NOT_FOUND));
+
+        if (!comment.getUser().getId().equals(userId)) {
+            throw new WeiboException(CommonErrorCode.COMMENT_CANT_DELETE);
+        }
+
+        commentRepository.deleteById(commentId);
+        postRepository.decrementCommentCount(comment.getPost().getId());
     }
 }

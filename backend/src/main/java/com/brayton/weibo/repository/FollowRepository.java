@@ -5,6 +5,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 
 import java.util.List;
+import java.util.Set;
 
 public interface FollowRepository extends JpaRepository<FollowRelation, Long> {
 
@@ -13,10 +14,10 @@ public interface FollowRepository extends JpaRepository<FollowRelation, Long> {
     void deleteByFollowerIdAndFollowingId(Long followerId, Long followingId);
 
     @Query("SELECT f.followingId FROM FollowRelation f WHERE f.followerId = :userId")
-    List<Long> findFollowingIds(Long userId);
+    Set<Long> findFollowingIds(Long userId);
 
     @Query("SELECT f.followerId FROM FollowRelation f WHERE f.followingId = :userId")
-    List<Long> findFollowerIds(Long userId);
+    Set<Long> findFollowerIds(Long userId);
 
     @Query("""
     SELECT f.followingId
@@ -28,7 +29,7 @@ public interface FollowRepository extends JpaRepository<FollowRelation, Long> {
             AND f2.followingId = :userId
       )
 """)
-    List<Long> findFriendIds(Long userId);
+    Set<Long> findFriendIds(Long userId);
 
     @Query("""
     SELECT COUNT(*)

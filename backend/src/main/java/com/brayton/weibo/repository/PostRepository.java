@@ -1,18 +1,41 @@
 package com.brayton.weibo.repository;
 
 import com.brayton.weibo.entity.Post;
+import com.brayton.weibo.enums.PostVisibility;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.util.List;
+import java.util.Set;
 
 public interface PostRepository extends JpaRepository<Post, Long> {
     // 根据作者查帖子（按时间倒序）
     List<Post> findByUserIdOrderByCreatedAtDesc(Long userId);
 
-    List<Post> findByUserIdInOrderByCreatedAtDesc(List<Long> userIds);
+    List<Post> findByUserIdAndVisibilityIn(
+            Long userId,
+            List<PostVisibility> visibilityList
+    );
+    List<Post> findByUserIdAndVisibilityInOrderByCreatedAtDesc(
+            Long userId,
+            List<PostVisibility> visibilityList
+    );
+
+    List<Post> findByUserIdInAndVisibility(
+            Set<Long> userIds,
+            PostVisibility visibility
+    );
+
+    List<Post> findByUserIdInAndVisibilityIn(
+            Set<Long> userIds,
+            List<PostVisibility> visibilityList
+    );
+    List<Post> findByUserIdInAndVisibilityInOrderByCreatedAtDesc(
+            Set<Long> userIds,
+            List<PostVisibility> visibilityList
+    );
 
     // Cursor 分页用：查某用户的帖子，id < cursor，不用 offset，性能稳
     List<Post> findByUserIdAndIdLessThanOrderByIdDesc(Long userId, Long cursor);

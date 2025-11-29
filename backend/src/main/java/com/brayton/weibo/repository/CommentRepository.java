@@ -9,4 +9,6 @@ public interface CommentRepository extends JpaRepository<Comment, Long> {
 
     // 查询某个帖子下的所有评论（按时间排序）
     List<Comment> findByPostIdOrderByCreatedAtDesc(Long postId);
+
+    void deleteAllByPostId(Long postId);
 }

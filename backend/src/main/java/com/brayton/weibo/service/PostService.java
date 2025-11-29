@@ -6,18 +6,17 @@ import com.brayton.weibo.dto.UserResponse;
 import com.brayton.weibo.entity.Like;
 import com.brayton.weibo.entity.Post;
 import com.brayton.weibo.entity.User;
+import com.brayton.weibo.enums.PostVisibility;
 import com.brayton.weibo.error.CommonErrorCode;
 import com.brayton.weibo.error.ErrorCode;
 import com.brayton.weibo.error.WeiboException;
-import com.brayton.weibo.repository.FollowRepository;
-import com.brayton.weibo.repository.LikeRepository;
-import com.brayton.weibo.repository.PostRepository;
-import com.brayton.weibo.repository.UserRepository;
+import com.brayton.weibo.repository.*;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
-import java.util.List;
+import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -27,20 +26,19 @@ public class PostService {
     private final UserRepository userRepository;
     private final FollowRepository followRepository;
     private final LikeRepository likeRepository;
+    private final CommentRepository commentRepository;
 
     /**
      * 根据 post 构建完整响应
      */
-    private PostResponse buildPostResponse(Post post, Long currentUserId) {
+    private PostResponse buildPostResponse(Post post, Long currentUserId, boolean following, boolean followed) {
+
         User author = post.getUser();
         boolean isLiked = likeRepository.existsByUserIdAndPostId(currentUserId, post.getId());
-        boolean following = followRepository.existsByFollowerIdAndFollowingId(currentUserId, author.getId());
-        boolean followed = followRepository.existsByFollowerIdAndFollowingId(author.getId(), currentUserId);
-        int friendCount = followRepository.findFriendCountIds(author.getId());
 
         return PostResponse.builder()
                 .id(post.getId())
-                .user(new UserResponse(author, following, followed, friendCount))
+                .user(new UserResponse(author, following, followed, 0)) // Don't care friendCount
                 .content(post.getContent())
                 .images(post.getImages())
                 .visibility(post.getVisibility())
@@ -54,6 +52,7 @@ public class PostService {
 
     @Transactional
     public PostResponse createPost(Long userId, CreatePostRequest req) {
+
         // 业务校验：内容和图片不能同时为空
         if ((req.getContent() == null || req.getContent().isBlank())
                 && (req.getImages() == null || req.getImages().isEmpty())) {
@@ -70,46 +69,92 @@ public class PostService {
 
         Post saved = postRepository.save(post);
 
-        return buildPostResponse(saved, userId); // 返回新帖详情
+        return buildPostResponse(saved, userId, true, true); // 返回新帖详情
+    }
+
+    private List<PostVisibility> visibilityFilter(boolean self, boolean following, boolean followed) {
+
+        if (self)
+            return Arrays.asList(PostVisibility.values());
+
+        if (following && followed)
+            return Arrays.asList(PostVisibility.PUBLIC, PostVisibility.FOLLOWERS, PostVisibility.FRIENDS);
+
+        if (following)
+            return Arrays.asList(PostVisibility.PUBLIC, PostVisibility.FOLLOWERS);
+
+        return List.of(PostVisibility.PUBLIC);
     }
 
     public List<PostResponse> getAllPosts(Long userId, Long currentUserId) {
 
+        boolean following = followRepository.existsByFollowerIdAndFollowingId(currentUserId, userId);
+        boolean followed = followRepository.existsByFollowerIdAndFollowingId(userId, currentUserId);
+
+        List<PostVisibility> visibilities = visibilityFilter(userId.equals(currentUserId), following, followed);
+
         // 查这个用户的所有帖子
-        List<Post> posts = postRepository.findByUserIdOrderByCreatedAtDesc(userId);
+        List<Post> posts = postRepository.findByUserIdAndVisibilityInOrderByCreatedAtDesc(userId, visibilities);
 
         return posts.stream()
-                .map(post -> buildPostResponse(post, currentUserId))
+                .map(post -> buildPostResponse(post, currentUserId, following, followed))
                 .toList();
     }
 
     public List<PostResponse> getNewestFeed(Long currentUserId) {
 
-        // 1. 查我关注的所有用户 ID
-        List<Long> followingIds = followRepository.findFollowingIds(currentUserId);
-        followingIds.add(currentUserId);
+        List<PostResponse> postResponses = new ArrayList<>();
 
-        // 2. 查这些用户发的所有帖子（按创建时间倒序）
-        List<Post> posts = postRepository.findByUserIdInOrderByCreatedAtDesc(followingIds);
+        // self
+        List<Post> posts = postRepository.findByUserIdAndVisibilityIn(
+                currentUserId,
+                visibilityFilter(true, true, true)
+        );
+        postResponses.addAll(posts.stream()
+                .map(post -> buildPostResponse(post, currentUserId, true, true))
+                .toList()
+        );
 
-        // 3. 转成 DTO
-        return posts.stream()
-                .map(post -> buildPostResponse(post, currentUserId))
-                .toList();
+        // friends
+        Set<Long> friendIds = followRepository.findFriendIds(currentUserId);
+        posts = postRepository.findByUserIdInAndVisibilityIn(
+                friendIds,
+                visibilityFilter(false, true, true)
+        );
+        postResponses.addAll(posts.stream()
+                .map(post -> buildPostResponse(post, currentUserId, true, true))
+                .toList()
+        );
+
+        // following
+        Set<Long> followingIds = followRepository.findFollowingIds(currentUserId);
+        Set<Long> oneWayFollowing = followingIds.stream()
+                .filter(id -> !friendIds.contains(id))
+                .collect(Collectors.toSet());
+        posts = postRepository.findByUserIdInAndVisibilityIn(
+                oneWayFollowing,
+                visibilityFilter(false, true, false)
+        );
+        postResponses.addAll(posts.stream()
+                .map(post -> buildPostResponse(post, currentUserId, true, false))
+                .toList()
+        );
+
+        postResponses.sort(Comparator.comparing(PostResponse::getCreatedAt).reversed());
+
+        // 转成 DTO
+        return postResponses;
     }
 
     public List<PostResponse> getFriendPosts(Long currentUserId) {
 
-        // 1. 查我关注的所有用户 ID
-        List<Long> friendIds = followRepository.findFriendIds(currentUserId);
-        //friendIds.add(currentUserId);
+        Set<Long> friendIds = followRepository.findFriendIds(currentUserId);
+        List<PostVisibility> visibilities = visibilityFilter(false, true, true);
 
-        // 2. 查这些用户发的所有帖子（按创建时间倒序）
-        List<Post> posts = postRepository.findByUserIdInOrderByCreatedAtDesc(friendIds);
+        List<Post> posts = postRepository.findByUserIdInAndVisibilityInOrderByCreatedAtDesc(friendIds, visibilities);
 
-        // 3. 转成 DTO
         return posts.stream()
-                .map(post -> buildPostResponse(post, currentUserId))
+                .map(post -> buildPostResponse(post, currentUserId, true, true))
                 .toList();
     }
 
@@ -155,7 +200,7 @@ public class PostService {
         likeRepository.deleteAllByPostId(postId);
 
         // 2. 删评论（如果有 commentRepository）
-        //commentRepository.deleteAllByPostId(postId);
+        commentRepository.deleteAllByPostId(postId);
 
         // 3. 删帖子
         postRepository.deleteById(postId);

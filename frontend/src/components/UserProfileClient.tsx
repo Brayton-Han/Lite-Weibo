@@ -296,13 +296,7 @@ export default function UserProfileClient({ viewedUserId, activeTab }: UserProfi
               <p>No posts yet.</p>
             </div>
           ) : (
-            posts.filter(post => {
-              if (isOwnProfile) return true;
-              if (post.visibility === 'PUBLIC') return true;
-              if (post.visibility === 'FOLLOWERS' && (viewedUser as any).following) return true;
-              if (post.visibility === 'FRIENDS' && (viewedUser as any).following && (viewedUser as any).followed) return true;
-              return false;
-            }).map(post => (
+            posts.map(post => (
               <PostCard 
                 key={post.id} 
                 post={post} 

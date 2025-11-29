@@ -18,6 +18,9 @@ public enum CommonErrorCode implements ErrorCode {
     POST_NOT_FOUND(1501, "post not found"),
     POST_CANT_DELETE(1502, "can't delete post"),
 
+    COMMENT_NOT_FOUND(1600, "comment not found"),
+    COMMENT_CANT_DELETE(1601, "can't delete comment"),
+
     TOKEN_EXPIRED(2001, "Token expired"),
 
     VALIDATION_FAILED(4001, "validation failed"),
