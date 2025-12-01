@@ -2,7 +2,6 @@ package com.brayton.weibo.repository;
 
 import com.brayton.weibo.entity.Post;
 import com.brayton.weibo.enums.PostVisibility;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
@@ -29,6 +28,8 @@ public interface PostRepository extends JpaRepository<Post, Long> {
             @Param("lastId") Long lastId,
             Pageable pageable
     );
+
+    List<Post> findByIdInOrderByCreatedAtDesc(Set<Object> postIds);
 
     @Modifying
     @Query("UPDATE Post p SET p.likeCount = p.likeCount + 1 WHERE p.id = :postId")

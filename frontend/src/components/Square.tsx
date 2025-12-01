@@ -22,13 +22,12 @@ export default function Square({ currentTab }: SquareProps) {
   
   // --- State ---
   const [posts, setPosts] = useState<Post[]>([]);
-  const [loading, setLoading] = useState(true); // 初始全屏加载
-  const [loadingMore, setLoadingMore] = useState(false); // 底部滚动加载
+  const [loading, setLoading] = useState(true); 
+  const [loadingMore, setLoadingMore] = useState(false); 
   const [hasMore, setHasMore] = useState(true); 
   const [me, setMe] = useState<User | null>(null);
 
   // --- Refs ---
-  // 用于监听到底部的引用
   const observerTarget = useRef<HTMLDivElement>(null);
 
   // --- Helpers: 侧边栏样式 ---
@@ -48,19 +47,28 @@ export default function Square({ currentTab }: SquareProps) {
   };
 
   // --- Core: 获取帖子列表 ---
-  const fetchPosts = useCallback(async (isInit: boolean, lastId?: number) => {
+  // 修改点 2: 参数类型改为 number | string，以兼容 ID 和 时间戳 cursor
+  const fetchPosts = useCallback(async (isInit: boolean, cursorParam?: number | string) => {
     if (isInit) setLoading(true);
     else setLoadingMore(true);
 
     try {
-      let baseUrl = '/posts';
+      let baseUrl = '/posts'; // newest 默认走 redis 接口
       if (currentTab === 'friends') baseUrl = '/posts/friends';
       if (currentTab === 'following') baseUrl = '/posts/following';
 
       const params = new URLSearchParams();
       params.append('size', PAGE_SIZE.toString());
-      if (lastId) {
-        params.append('lastId', lastId.toString());
+
+      // 修改点 3: 根据 Tab 类型决定传 cursor 还是 lastId
+      if (cursorParam) {
+        if (currentTab === 'newest') {
+          // Redis 模式：传 cursor (时间戳)
+          params.append('cursor', cursorParam.toString());
+        } else {
+          // DB 模式 (关注/好友)：传 lastId
+          params.append('lastId', cursorParam.toString());
+        }
       }
 
       const res = await api.get<ApiResponse<Post[]>>(`${baseUrl}?${params.toString()}`);
@@ -68,7 +76,6 @@ export default function Square({ currentTab }: SquareProps) {
       if (res.data.code === 0) {
         const newPosts = res.data.data || [];
         
-        // 如果返回数量小于 pageSize，说明没有更多了
         if (newPosts.length < PAGE_SIZE) {
           setHasMore(false);
         } else {
@@ -117,23 +124,32 @@ export default function Square({ currentTab }: SquareProps) {
   }, [currentTab, fetchPosts]);
 
   // --- Handlers: Load More (逻辑封装) ---
-  // 这里不需要 useCallback，因为它依赖 posts 的变化，直接定义即可
   const handleLoadMore = () => {
     if (loadingMore || !hasMore || posts.length === 0) return;
+    
     const lastPost = posts[posts.length - 1];
-    fetchPosts(false, lastPost.id);
+
+    // 修改点 4: 针对 newest 使用 createTime 转时间戳，其他使用 id
+    if (currentTab === 'newest') {
+      // 假设 Post 类型中有 createTime 字段 (如果是字符串需转 number)
+      // 如果后端返回的是 long 类型时间戳，直接用；如果是 ISO String，需 new Date().getTime()
+      // 这里为了稳健，尝试转为 timestamp
+      const cursor = new Date(lastPost.createdAt).getTime(); 
+      fetchPosts(false, cursor);
+    } else {
+      fetchPosts(false, lastPost.id);
+    }
   };
 
   // --- Effect: Intersection Observer (触底监听) ---
   useEffect(() => {
     const observer = new IntersectionObserver(
       entries => {
-        // 如果底部元素可见，且还有数据，且当前没有正在加载
         if (entries[0].isIntersecting && hasMore && !loadingMore && !loading) {
           handleLoadMore();
         }
       },
-      { threshold: 0.1 } // 只要露出 10% 就触发
+      { threshold: 0.1 } 
     );
 
     if (observerTarget.current) {
@@ -145,7 +161,6 @@ export default function Square({ currentTab }: SquareProps) {
         observer.unobserve(observerTarget.current);
       }
     };
-  // 这里依赖项很重要：当 posts 更新后，需要重新评估 observer 的触发条件
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [posts, hasMore, loadingMore, loading]);
 
@@ -213,7 +228,6 @@ export default function Square({ currentTab }: SquareProps) {
                 ))}
 
                 {/* --- 底部哨兵元素 / 加载状态 --- */}
-                {/* 只要不是初始加载，这里就会渲染 */}
                 <div ref={observerTarget} className="py-6 text-center h-20 flex items-center justify-center">
                   {loadingMore && (
                     <div className="flex items-center text-gray-500 text-sm">

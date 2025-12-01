@@ -55,6 +55,14 @@ public interface FollowRepository extends JpaRepository<FollowRelation, Long> {
         WHERE f.followingId = :userId
         ORDER BY f.id DESC
     """)
+    Set<Long> findFollowerIds(Long userId);
+
+    @Query("""
+        SELECT f.followerId
+        FROM FollowRelation f
+        WHERE f.followingId = :userId
+        ORDER BY f.id DESC
+    """)
     List<Long> findFollowerIds(
             @Param("userId") Long userId,
             Pageable pageable

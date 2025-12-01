@@ -40,11 +40,11 @@ public class PostController {
 
     @GetMapping("/posts")
     public ResponseEntity<ApiResponse<?>> getNewestFeed(
-            @RequestParam(required = false) Long lastId,
+            @RequestParam(required = false) Long cursor,
             @RequestParam(defaultValue = "10") int size,
             @AuthenticationPrincipal CustomUserDetails self
     ) {
-        List<PostResponse> posts = postService.getNewestFeed(self.getId(), lastId, size);
+        List<PostResponse> posts = postService.getNewestFeed(self.getId(), cursor, size);
         return ResponseEntity.ok(ApiResponse.success(posts));
     }
 

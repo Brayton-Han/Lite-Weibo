@@ -15,8 +15,11 @@ import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.redis.core.ZSetOperations;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
+import java.time.ZoneId;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -29,6 +32,7 @@ public class PostService {
     private final FollowRepository followRepository;
     private final LikeRepository likeRepository;
     private final CommentRepository commentRepository;
+    private final RedisService redisService;
 
     /**
      * 根据 post 构建完整响应
@@ -86,63 +90,19 @@ public class PostService {
                 .toList();
     }
 
-    public List<PostResponse> getNewestFeed(Long currentUserId, Long lastId, int size) {
+    public List<PostResponse> getNewestFeed(Long userId, Long lastTimestamp, int size) {
 
-        List<PostResponse> postResponses = new ArrayList<>();
-        Pageable pageable = PageRequest.of(0, size);
+        Set<Object> postIds = (lastTimestamp == null)
+                ? redisService.getFeed(userId, size)
+                : redisService.getFeedAfter(userId, lastTimestamp, size);
 
-        // self
-        List<Post> posts = postRepository.findNewestPosts(
-                Set.of(currentUserId),
-                visibilityFilter(true, true, true),
-                lastId,
-                pageable
-        );
-        postResponses.addAll(posts.stream()
-                .map(post -> buildPostResponse(post, currentUserId, true, true))
-                .toList()
-        );
+        if (postIds.isEmpty()) return List.of();
 
-        // friends
-        Set<Long> friendIds = followRepository.findFriendIds(currentUserId);
-        if (!friendIds.isEmpty()) {
-            posts = postRepository.findNewestPosts(
-                    friendIds,
-                    visibilityFilter(false, true, true),
-                    lastId,
-                    pageable
-            );
-            postResponses.addAll(posts.stream()
-                    .map(post -> buildPostResponse(post, currentUserId, true, true))
-                    .toList()
-            );
-        }
+        List<Post> posts = postRepository.findByIdInOrderByCreatedAtDesc(postIds);
 
-        // following
-        Set<Long> followingIds = followRepository.findFollowingIds(currentUserId);
-        Set<Long> oneWayFollowing = followingIds.stream()
-                .filter(id -> !friendIds.contains(id))
-                .collect(Collectors.toSet());
-        if (!oneWayFollowing.isEmpty()) {
-            posts = postRepository.findNewestPosts(
-                    oneWayFollowing,
-                    visibilityFilter(false, true, false),
-                    lastId,
-                    pageable
-            );
-            postResponses.addAll(posts.stream()
-                    .map(post -> buildPostResponse(post, currentUserId, true, false))
-                    .toList()
-            );
-        }
-
-        postResponses.sort(Comparator.comparing(PostResponse::getId).reversed());
-
-        if (postResponses.size() > size) {
-            return postResponses.subList(0, size);
-        }
-
-        return postResponses;
+        return posts.stream()
+                .map(p -> buildPostResponse(p, userId, true, false))
+                .toList();
     }
 
     public List<PostResponse> getFriendPosts(Long currentUserId, Long lastId, int size) {
@@ -186,6 +146,37 @@ public class PostService {
         postRepository.decrementLikeCount(postId);
     }
 
+    @Async
+    public void pushPostToFollowersFeed(Post post) {
+        Long authorId = post.getUser().getId();
+        PostVisibility visibility = post.getVisibility();
+        long ts = post.getCreatedAt()
+                .atZone(ZoneId.systemDefault())
+                .toInstant()
+                .toEpochMilli();
+
+        Set<Long> pushIds = new HashSet<>();
+
+        // self
+        pushIds.add(authorId);
+
+        if (visibility == PostVisibility.FRIENDS) {
+            Set<Long> friendIds = followRepository.findFriendIds(authorId);
+            pushIds.addAll(friendIds);
+        } else if (visibility == PostVisibility.FOLLOWERS) {
+            Set<Long> followerIds = followRepository.findFollowerIds(authorId);
+            pushIds.addAll(followerIds);
+        } else if (visibility == PostVisibility.PUBLIC) {
+            // todo: recommend post
+            Set<Long> followerIds = followRepository.findFollowerIds(authorId);
+            pushIds.addAll(followerIds);
+        }
+
+        for (Long pushId : pushIds) {
+            redisService.addToFeed(pushId, post.getId(), ts);
+        }
+    }
+
     @Transactional
     public PostResponse createPost(Long userId, CreatePostRequest req) {
 
@@ -204,6 +195,9 @@ public class PostService {
         post.setVisibility(req.getVisibility());
 
         Post saved = postRepository.save(post);
+
+        // fan-out
+        pushPostToFollowersFeed(saved);
 
         return buildPostResponse(saved, userId, true, true); // 返回新帖详情
     }
