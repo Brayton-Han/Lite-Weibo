@@ -22,8 +22,13 @@ public class PostController {
     private final PostService postService;
 
     @GetMapping("/user/{uid}/posts")
-    public ResponseEntity<ApiResponse<?>> getPosts(@AuthenticationPrincipal CustomUserDetails self, @PathVariable long uid) {
-        List<PostResponse> posts = postService.getAllPosts(uid, self.getId());
+    public ResponseEntity<ApiResponse<?>> getPosts(
+            @AuthenticationPrincipal CustomUserDetails self,
+            @PathVariable long uid,
+            @RequestParam(required = false) Long lastId,
+            @RequestParam(defaultValue = "10") int size
+            ) {
+        List<PostResponse> posts = postService.getAllPosts(uid, self.getId(), lastId, size);
         return ResponseEntity.ok(ApiResponse.success(posts));
     }
 
@@ -34,14 +39,22 @@ public class PostController {
     }
 
     @GetMapping("/posts")
-    public ResponseEntity<ApiResponse<?>> getNewestFeed(@AuthenticationPrincipal CustomUserDetails self) {
-        List<PostResponse> posts = postService.getNewestFeed(self.getId());
+    public ResponseEntity<ApiResponse<?>> getNewestFeed(
+            @RequestParam(required = false) Long lastId,
+            @RequestParam(defaultValue = "10") int size,
+            @AuthenticationPrincipal CustomUserDetails self
+    ) {
+        List<PostResponse> posts = postService.getNewestFeed(self.getId(), lastId, size);
         return ResponseEntity.ok(ApiResponse.success(posts));
     }
 
     @GetMapping("/posts/friends")
-    public ResponseEntity<ApiResponse<?>> getFriendPosts(@AuthenticationPrincipal CustomUserDetails self) {
-        List<PostResponse> posts = postService.getFriendPosts(self.getId());
+    public ResponseEntity<ApiResponse<?>> getFriendPosts(
+            @RequestParam(required = false) Long lastId,
+            @RequestParam(defaultValue = "10") int size,
+            @AuthenticationPrincipal CustomUserDetails self
+    ) {
+        List<PostResponse> posts = postService.getFriendPosts(self.getId(), lastId, size);
         return ResponseEntity.ok(ApiResponse.success(posts));
     }
 

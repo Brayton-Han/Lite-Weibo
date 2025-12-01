@@ -24,9 +24,10 @@ public class UserResponse {
     private int friendCount;
     private boolean following; // 我是否关注了该用户
     private boolean followed; // 我是否被该用户关注
+    private int postCount;
 
     // 构造函数，用于将 User 实体转换为 Response DTO
-    public UserResponse(User user, boolean following, boolean followed, int friendCount) {
+    public UserResponse(User user, boolean following, boolean followed, int friendCount, int postCount) {
         this.id = user.getId();
         this.username = user.getUsername();
         this.gender = user.getGender();
@@ -39,5 +40,6 @@ public class UserResponse {
         this.friendCount = friendCount;
         this.following = following;
         this.followed = followed;
+        this.postCount = postCount;
     }
 }

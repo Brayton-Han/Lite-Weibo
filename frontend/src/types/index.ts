@@ -25,6 +25,7 @@ export interface User {
   friendCount: number;
   following: boolean;
   followed: boolean;
+  postCount: number;
 }
 
 // 登录请求参数

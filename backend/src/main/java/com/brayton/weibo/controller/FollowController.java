@@ -21,14 +21,23 @@ public class FollowController {
     private UserService userService;
 
     @GetMapping("user/{id}/following")
-    public ResponseEntity<ApiResponse<?>> getFollowingList(@PathVariable long id) {
-        List<UserResponse> followingList = followService.getFollowings(id);
+    public ResponseEntity<ApiResponse<?>> getFollowingList(
+            @PathVariable long id,
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(required = false) Long lastId
+    ) {
+        List<UserResponse> followingList = followService.getFollowings(id, lastId, size);
         return ResponseEntity.ok(ApiResponse.success(followingList));
     }
 
     @GetMapping("user/{id}/followers")
-    public ResponseEntity<ApiResponse<?>> getFollowerList(@PathVariable long id) {
-        List<UserResponse> followerList = followService.getFollowers(id);
+    public ResponseEntity<ApiResponse<?>> getFollowerList(
+            @PathVariable long id,
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(required = false) Long lastId
+    ) {
+        System.out.println("size: " + size +  " lastId: " + lastId);
+        List<UserResponse> followerList = followService.getFollowers(id, lastId, size);
         return ResponseEntity.ok(ApiResponse.success(followerList));
     }
 

@@ -10,6 +10,8 @@ import com.brayton.weibo.repository.FollowRepository;
 import com.brayton.weibo.repository.UserRepository;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -18,6 +20,7 @@ import java.util.List;
 @Service
 @RequiredArgsConstructor
 public class FollowService {
+
     private final FollowRepository followRepository;
     private final UserRepository userRepository;
     private final UserService userService;
@@ -45,25 +48,45 @@ public class FollowService {
         userRepository.decrementFollowCountById(followerId);
     }
 
-    public List<UserResponse> getFollowers(long id) {
+    public List<UserResponse> getFollowers(Long id, Long lastId, int size) {
 
         if (!userRepository.existsById(id)) {
             throw new WeiboException(CommonErrorCode.USER_NOT_FOUND);
         }
 
-        return followRepository.findFollowerIds(id)
+        if (lastId == null) {
+            return followRepository.findFollowerIds(id, PageRequest.of(0, size))
+                    .stream()
+                    .map(userService::getUserInfoById)
+                    .toList();
+        }
+
+        FollowRelation relation = followRepository.findByFollowerIdAndFollowingId(lastId, id)
+                .orElseThrow(() -> new WeiboException(CommonErrorCode.FOLLOWING_ID_NOT_EXISTS));
+
+        return followRepository.findFollowerIds(id, relation.getId(), PageRequest.of(0, size))
                 .stream()
                 .map(userService::getUserInfoById)
                 .toList();
     }
 
-    public List<UserResponse> getFollowings(long id) {
+    public List<UserResponse> getFollowings(Long id, Long lastId, int size) {
 
         if (!userRepository.existsById(id)) {
             throw new WeiboException(CommonErrorCode.USER_NOT_FOUND);
         }
 
-        return followRepository.findFollowingIds(id)
+        if (lastId == null) {
+            return followRepository.findFollowingIds(id, PageRequest.of(0, size))
+                    .stream()
+                    .map(userService::getUserInfoById)
+                    .toList();
+        }
+
+        FollowRelation relation = followRepository.findByFollowerIdAndFollowingId(id, lastId)
+                .orElseThrow(() -> new WeiboException(CommonErrorCode.FOLLOWING_ID_NOT_EXISTS));
+
+        return followRepository.findFollowingIds(id, relation.getId(), PageRequest.of(0, size))
                 .stream()
                 .map(userService::getUserInfoById)
                 .toList();

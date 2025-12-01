@@ -32,13 +32,13 @@ public class CommentService {
 
         boolean following = followRepository.existsByFollowerIdAndFollowingId(currentUserId, comment.getUser().getId());
         boolean followed = followRepository.existsByFollowerIdAndFollowingId(comment.getUser().getId(), currentUserId);
-        int friendCount = followRepository.findFriendCountIds(currentUserId);
 
         return CommentResponse.builder()
                 .createdAt(comment.getCreatedAt())
                 .content(comment.getContent())
                 .id(comment.getId())
-                .user(new UserResponse(comment.getUser(), following, followed, friendCount))
+                // Don't care friendCount and postCount
+                .user(new UserResponse(comment.getUser(), following, followed, 0, 0))
                 .build();
     }
 
