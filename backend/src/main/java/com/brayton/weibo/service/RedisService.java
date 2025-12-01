@@ -33,4 +33,9 @@ public class RedisService {
                 size
         );
     }
+
+    public void trimFeed(long userId, int maxSize) {
+        String key = "feed:" + userId;
+        redis.opsForZSet().removeRange(key, 0, -maxSize - 1);
+    }
 }

@@ -4,6 +4,7 @@ import com.brayton.weibo.config.security.CustomUserDetails;
 import com.brayton.weibo.dto.ApiResponse;
 import com.brayton.weibo.dto.CreatePostRequest;
 import com.brayton.weibo.dto.PostResponse;
+import com.brayton.weibo.dto.PostUpdateRequest;
 import com.brayton.weibo.entity.Post;
 import com.brayton.weibo.service.PostService;
 import lombok.AllArgsConstructor;
@@ -31,6 +32,17 @@ public class PostController {
         List<PostResponse> posts = postService.getAllPosts(uid, self.getId(), lastId, size);
         return ResponseEntity.ok(ApiResponse.success(posts));
     }
+
+    @PutMapping("/posts/{id}")
+    public ResponseEntity<ApiResponse<?>> updatePost(
+            @PathVariable long id,
+            @RequestBody PostUpdateRequest req,
+            @AuthenticationPrincipal CustomUserDetails currentUser
+    ) {
+        PostResponse res = postService.updatePost(id, req, currentUser.getId());
+        return ResponseEntity.ok(ApiResponse.success(res));
+    }
+
 
     @DeleteMapping("/posts/{pid}")
     public ResponseEntity<ApiResponse<?>> deletePosts(@AuthenticationPrincipal CustomUserDetails user, @PathVariable long pid) {

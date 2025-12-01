@@ -49,12 +49,12 @@ export enum PostVisibility {
   PUBLIC = 'PUBLIC',
   PRIVATE = 'PRIVATE',
   FOLLOWERS = 'FOLLOWERS',
-  FRIENDS = 'FRIENDS' // 假设你有这个选项
+  FRIENDS = 'FRIENDS'
 }
 
 export interface Post {
   id: number;
-  user: User; // 复用你现有的 User 类型
+  user: User;
   content: string;
   images: string[];
   visibility: PostVisibility;
@@ -63,6 +63,7 @@ export interface Post {
   commentCount: number;
   createdAt: string; // Java LocalDateTime 序列化后通常是 ISO 字符串
   updatedAt: string;
+  edited: boolean;
 }
 
 export interface CreatePostRequest {

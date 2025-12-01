@@ -1,21 +1,26 @@
 package com.brayton.weibo.service;
 
+import com.brayton.weibo.common.TimeUtil;
 import com.brayton.weibo.dto.UserResponse;
 import com.brayton.weibo.entity.FollowRelation;
+import com.brayton.weibo.entity.Post;
 import com.brayton.weibo.entity.User;
 import com.brayton.weibo.error.CommonErrorCode;
 import com.brayton.weibo.error.ErrorCode;
 import com.brayton.weibo.error.WeiboException;
 import com.brayton.weibo.repository.FollowRepository;
+import com.brayton.weibo.repository.PostRepository;
 import com.brayton.weibo.repository.UserRepository;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
@@ -23,10 +28,29 @@ public class FollowService {
 
     private final FollowRepository followRepository;
     private final UserRepository userRepository;
+    private final PostRepository postRepository;
     private final UserService userService;
+    private final RedisService redisService;
+
+    @Async
+    public void newFollowPostWarmUp(long followerId, long followingId) {
+
+        boolean followed = followRepository.existsByFollowerIdAndFollowingId(followingId, followerId);
+        List<Post> posts = postRepository.findNewestPosts(
+                Set.of(followingId),
+                PostService.visibilityFilter(false, true, followed),
+                Long.MAX_VALUE,
+                PageRequest.of(0, 20)
+        );
+        for (Post post : posts) {
+            redisService.addToFeed(followerId, post.getId(), TimeUtil.toTs(post.getCreatedAt()));
+        }
+        redisService.trimFeed(followerId, 1000);
+    }
 
     @Transactional
     public void follow(long followerId, long followingId) {
+
         if (followerId == followingId) {
             throw new WeiboException(CommonErrorCode.FOLLOW_YOURSELF);
         }
@@ -36,6 +60,9 @@ public class FollowService {
         followRepository.save(new FollowRelation(followerId, followingId));
         userRepository.incrementFollowerCountById(followingId);
         userRepository.incrementFollowCountById(followerId);
+
+        // warm-up
+        newFollowPostWarmUp(followerId, followingId);
     }
 
     @Transactional

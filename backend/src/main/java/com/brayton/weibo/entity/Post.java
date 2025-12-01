@@ -67,4 +67,7 @@ public class Post {
     // 更新时间
     @UpdateTimestamp
     private LocalDateTime updatedAt;
+
+    @Column(nullable = false)
+    private boolean isEdited = false;
 }

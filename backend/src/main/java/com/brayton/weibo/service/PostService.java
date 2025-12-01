@@ -1,7 +1,9 @@
 package com.brayton.weibo.service;
 
+import com.brayton.weibo.common.TimeUtil;
 import com.brayton.weibo.dto.CreatePostRequest;
 import com.brayton.weibo.dto.PostResponse;
+import com.brayton.weibo.dto.PostUpdateRequest;
 import com.brayton.weibo.dto.UserResponse;
 import com.brayton.weibo.entity.Like;
 import com.brayton.weibo.entity.Post;
@@ -54,10 +56,57 @@ public class PostService {
                 .commentCount(post.getCommentCount())
                 .createdAt(post.getCreatedAt())
                 .updatedAt(post.getUpdatedAt())
+                .isEdited(post.isEdited())
                 .build();
     }
 
-    private List<PostVisibility> visibilityFilter(boolean self, boolean following, boolean followed) {
+
+
+    // !!! ONLY USE FOR NEWEST POST TIMELINE !!!
+    private boolean isVisibleToUser(Post post, boolean self, boolean following, boolean followed) {
+        // 自己永远能看到自己的帖子
+        if (self) return true;
+
+        // 已取关
+        if (!following) return false;
+
+        return switch (post.getVisibility()) {
+            case PUBLIC, FOLLOWERS -> true;
+            case PRIVATE -> false;
+            case FRIENDS -> followed;
+        };
+    }
+
+    public List<PostResponse> getNewestFeed(Long userId, Long lastTimestamp, int size) {
+
+        long cursor = lastTimestamp == null ? Long.MAX_VALUE : lastTimestamp;
+        List<PostResponse> result = new ArrayList<>();
+
+        while (result.size() < size) {
+            Set<Object> postIds = redisService.getFeedAfter(userId, cursor, size);
+            if (postIds.isEmpty()) break;
+
+            List<Post> posts = postRepository.findByIdInOrderByCreatedAtDesc(postIds);
+            for (Post post : posts) {
+                if (result.size() >= size) break;
+
+                Long authorId = post.getUser().getId();
+                boolean sameUser = authorId.equals(userId);
+                boolean following = sameUser || followRepository.existsByFollowerIdAndFollowingId(userId, authorId);
+                boolean followed = sameUser || followRepository.existsByFollowerIdAndFollowingId(authorId, userId);
+
+                if (isVisibleToUser(post, sameUser, following, followed)) {
+                    result.add(buildPostResponse(post, userId, following, followed));
+                }
+
+                cursor = TimeUtil.toTs(post.getCreatedAt());
+            }
+        }
+
+        return result;
+    }
+
+    static public List<PostVisibility> visibilityFilter(boolean self, boolean following, boolean followed) {
 
         if (self)
             return Arrays.asList(PostVisibility.values());
@@ -90,21 +139,6 @@ public class PostService {
                 .toList();
     }
 
-    public List<PostResponse> getNewestFeed(Long userId, Long lastTimestamp, int size) {
-
-        Set<Object> postIds = (lastTimestamp == null)
-                ? redisService.getFeed(userId, size)
-                : redisService.getFeedAfter(userId, lastTimestamp, size);
-
-        if (postIds.isEmpty()) return List.of();
-
-        List<Post> posts = postRepository.findByIdInOrderByCreatedAtDesc(postIds);
-
-        return posts.stream()
-                .map(p -> buildPostResponse(p, userId, true, false))
-                .toList();
-    }
-
     public List<PostResponse> getFriendPosts(Long currentUserId, Long lastId, int size) {
 
         List<Post> posts = postRepository.findNewestPosts(
@@ -118,6 +152,8 @@ public class PostService {
                 .map(post -> buildPostResponse(post, currentUserId, true, true))
                 .toList();
     }
+
+
 
     @Transactional
     public void likePost(Long userId, Long postId) {
@@ -150,10 +186,7 @@ public class PostService {
     public void pushPostToFollowersFeed(Post post) {
         Long authorId = post.getUser().getId();
         PostVisibility visibility = post.getVisibility();
-        long ts = post.getCreatedAt()
-                .atZone(ZoneId.systemDefault())
-                .toInstant()
-                .toEpochMilli();
+        long ts = TimeUtil.toTs(post.getCreatedAt());
 
         Set<Long> pushIds = new HashSet<>();
 
@@ -193,6 +226,7 @@ public class PostService {
         post.setContent(req.getContent());
         post.setImages(req.getImages());
         post.setVisibility(req.getVisibility());
+        post.setEdited(false);
 
         Post saved = postRepository.save(post);
 
@@ -221,5 +255,36 @@ public class PostService {
 
         // 3. 删帖子
         postRepository.deleteById(postId);
+    }
+
+    @Transactional
+    public PostResponse updatePost(long postId, PostUpdateRequest req, Long currentUserId) {
+
+        Post post = postRepository.findById(postId)
+                .orElseThrow(() -> new WeiboException(CommonErrorCode.POST_NOT_FOUND));
+
+        // 校验权限：只能修改自己的
+        if (!post.getUser().getId().equals(currentUserId)) {
+            throw new WeiboException(CommonErrorCode.POST_CANT_DELETE);
+        }
+
+        PostVisibility oldVisibility = post.getVisibility();
+        // 更新可见性（或内容）
+        if (req.getVisibility() != null) {
+            post.setVisibility(req.getVisibility());
+        }
+        if (req.getContent() != null) {
+            post.setContent(req.getContent());
+        }
+
+        post.setEdited(true);
+        Post saved = postRepository.save(post);
+
+        // 🍿 修补 timeline
+        if (saved.getVisibility().ordinal() < oldVisibility.ordinal()) {
+            pushPostToFollowersFeed(saved);
+        }
+
+        return buildPostResponse(saved, currentUserId, true, true);
     }
 }

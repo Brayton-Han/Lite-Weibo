@@ -33,4 +33,6 @@ public class PostResponse {
     // 时间
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+
+    private boolean isEdited;
 }
