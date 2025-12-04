@@ -1,14 +1,15 @@
 'use client';
 
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback, ChangeEvent } from 'react';
 import api from '@/lib/api';
+import { convertToJpegIfNeeded } from '@/lib/imageUtils';
 import { ApiResponse, User, Post } from '@/types';
 import { useRouter } from 'next/navigation';
 import { toast } from 'react-hot-toast';
-import { Layout, Users, Heart, UserPlus, UserMinus, UserCheck, Loader2 } from 'lucide-react';
+import { Layout, Users, Heart, UserPlus, UserMinus, UserCheck, Loader2, Camera } from 'lucide-react';
 import PostCard from './PostCard'; 
 import CreatePostWidget from './CreatePostWidget'; 
-import Navbar from '@/components/Navbar'; 
+import Navbar from '@/components/Navbar';
 
 interface UserProfileClientProps {
   viewedUserId: string; 
@@ -23,26 +24,29 @@ export default function UserProfileClient({ viewedUserId, activeTab }: UserProfi
   // --- Base Data ---
   const [me, setMe] = useState<User | null>(null);
   const [viewedUser, setViewedUser] = useState<User | null>(null);
-  const [profileLoading, setProfileLoading] = useState(true); // 仅控制用户信息头部的加载
+  const [profileLoading, setProfileLoading] = useState(true);
 
-  // --- Posts Pagination State (Profile Tab) ---
+  // --- Avatar Upload State ---
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+
+  // --- Posts Pagination State ---
   const [posts, setPosts] = useState<Post[]>([]);
-  const [postsLoading, setPostsLoading] = useState(false); // 初始加载
-  const [postsLoadingMore, setPostsLoadingMore] = useState(false); // 追加加载
+  const [postsLoading, setPostsLoading] = useState(false);
+  const [postsLoadingMore, setPostsLoadingMore] = useState(false);
   const [postsHasMore, setPostsHasMore] = useState(true);
 
-  // --- User List Pagination State (Following/Followers/Friends Tabs) ---
+  // --- User List Pagination State ---
   const [userList, setUserList] = useState<User[]>([]);
-  const [listLoading, setListLoading] = useState(false); // 初始加载
-  const [listLoadingMore, setListLoadingMore] = useState(false); // 追加加载
+  const [listLoading, setListLoading] = useState(false);
+  const [listLoadingMore, setListLoadingMore] = useState(false);
   const [listHasMore, setListHasMore] = useState(true);
 
-  // --- Ref for Infinite Scroll ---
   const observerTarget = useRef<HTMLDivElement>(null);
 
   const isOwnProfile = String(me?.id) === String(viewedUser?.id);
 
-  // 1. 初始化：获取 Me 和 ViewedUser 基本信息 (不含列表)
+  // 1. 初始化数据
   useEffect(() => {
     const initBaseData = async () => {
       setProfileLoading(true);
@@ -74,7 +78,7 @@ export default function UserProfileClient({ viewedUserId, activeTab }: UserProfi
     initBaseData();
   }, [viewedUserId]);
 
-  // 2. Fetch Posts Logic (Cursor Pagination)
+  // 2. 获取帖子逻辑
   const fetchPosts = useCallback(async (isInit: boolean, lastId?: number) => {
     if (isInit) setPostsLoading(true);
     else setPostsLoadingMore(true);
@@ -88,14 +92,10 @@ export default function UserProfileClient({ viewedUserId, activeTab }: UserProfi
       
       if (res.data.code === 0) {
         const newPosts = res.data.data || [];
-        if (newPosts.length < PAGE_SIZE) setPostsHasMore(false);
-        else setPostsHasMore(true);
+        setPostsHasMore(newPosts.length >= PAGE_SIZE);
 
-        if (isInit) {
-          setPosts(newPosts);
-        } else {
-          setPosts(prev => [...prev, ...newPosts]);
-        }
+        if (isInit) setPosts(newPosts);
+        else setPosts(prev => [...prev, ...newPosts]);
       }
     } catch (e) {
       toast.error("Failed to load posts");
@@ -105,9 +105,8 @@ export default function UserProfileClient({ viewedUserId, activeTab }: UserProfi
     }
   }, [viewedUserId]);
 
-  // 3. Fetch User List Logic
+  // 3. 获取用户列表逻辑
   const fetchUserList = useCallback(async (isInit: boolean, lastId?: number) => {
-    // 确定 URL
     let urlBase = '';
     if (activeTab === 'following') urlBase = `/user/${viewedUserId}/following`;
     else if (activeTab === 'followers') urlBase = `/user/${viewedUserId}/followers`;
@@ -120,41 +119,23 @@ export default function UserProfileClient({ viewedUserId, activeTab }: UserProfi
 
     try {
       const params = new URLSearchParams();
-
-      // --- 修改开始：针对 Friends 列表的特殊处理 ---
       if (activeTab === 'friends') {
-        // 如果是好友列表，设定一个很大的 size 以便一次性拉取所有数据
-        // (前提是后端允许较大的 page size，或者后端在不传 size 时默认返回全部)
         params.append('size', '10000');
-        // Friends 列表不传 lastId，因为是一次性获取
       } else {
-        // 其他列表 (Following/Followers) 保持原有的分页逻辑
         params.append('size', PAGE_SIZE.toString());
         if (lastId) params.append('lastId', lastId.toString());
       }
-      // --- 修改结束 ---
 
       const res = await api.get<ApiResponse<User[]>>(`${urlBase}?${params.toString()}`);
 
       if (res.data.code === 0) {
         const newUsers = res.data.data || [];
+        
+        if (activeTab === 'friends') setListHasMore(false);
+        else setListHasMore(newUsers.length >= PAGE_SIZE);
 
-        // --- 修改开始：处理 HasMore ---
-        if (activeTab === 'friends') {
-          // 好友列表一次性加载完，不再需要“加载更多”
-          setListHasMore(false);
-        } else {
-          // 其他列表保持原逻辑
-          if (newUsers.length < PAGE_SIZE) setListHasMore(false);
-          else setListHasMore(true);
-        }
-        // --- 修改结束 ---
-
-        if (isInit) {
-          setUserList(newUsers);
-        } else {
-          setUserList(prev => [...prev, ...newUsers]);
-        }
+        if (isInit) setUserList(newUsers);
+        else setUserList(prev => [...prev, ...newUsers]);
       }
     } catch (e) {
       toast.error("Failed to load list");
@@ -164,85 +145,128 @@ export default function UserProfileClient({ viewedUserId, activeTab }: UserProfi
     }
   }, [activeTab, viewedUserId]);
 
-  // 4. 当 activeTab 是 profile 且 me 已加载后，再加载帖子
+  // 4. Tab 切换触发逻辑
   useEffect(() => {
     if (activeTab !== "profile") return;
-  if (me === null) return; // 等待登录用户信息先加载完成
-
+    if (me === null) return;
     setPosts([]);
     setPostsHasMore(true);
-    // 这里才是第一次真正加载 posts
     fetchPosts(true);
   }, [activeTab, me, fetchPosts]);
 
-  // 添加在 fetchUserList 定义之后
   useEffect(() => {
-    // 如果是 profile，由另一个 effect 处理；如果是列表页，在这里触发
     if (activeTab === 'profile') return;
-
-    // 清空之前的列表，避免闪烁上一页的数据
     setUserList([]); 
     setListHasMore(true);
-  
-    // 触发初始加载
     fetchUserList(true);
   }, [activeTab, fetchUserList]);
 
-  // 5. Unified Load More Handler
+  // 5. 加载更多逻辑
   const handleLoadMore = () => {
     if (activeTab === 'profile') {
-      // Load more posts
       if (postsLoadingMore || !postsHasMore || posts.length === 0) return;
-      const lastPost = posts[posts.length - 1];
-      fetchPosts(false, lastPost.id);
+      fetchPosts(false, posts[posts.length - 1].id);
     } else {
-      // Load more users
       if (listLoadingMore || !listHasMore || userList.length === 0) return;
-      const lastUser = userList[userList.length - 1];
-      // 假设 User ID 是 number，如果是 string 需要根据后端要求传
-      fetchUserList(false, Number(lastUser.id)); 
+      fetchUserList(false, Number(userList[userList.length - 1].id)); 
     }
   };
 
-  // 6. Intersection Observer
+  // 6. 滚动监听
   useEffect(() => {
     const observer = new IntersectionObserver(
       entries => {
-        const isTargetIntersecting = entries[0].isIntersecting;
-        
-        if (activeTab === 'profile') {
-          if (isTargetIntersecting && postsHasMore && !postsLoading && !postsLoadingMore) {
-            handleLoadMore();
-          }
-        } else {
-          if (isTargetIntersecting && listHasMore && !listLoading && !listLoadingMore) {
-            handleLoadMore();
-          }
+        if (entries[0].isIntersecting) {
+            if (activeTab === 'profile' && postsHasMore && !postsLoading && !postsLoadingMore) handleLoadMore();
+            else if (activeTab !== 'profile' && listHasMore && !listLoading && !listLoadingMore) handleLoadMore();
         }
       },
       { threshold: 0.1 }
     );
-
     if (observerTarget.current) observer.observe(observerTarget.current);
+    return () => { if (observerTarget.current) observer.unobserve(observerTarget.current); };
+  }, [activeTab, postsHasMore, postsLoading, postsLoadingMore, listHasMore, listLoading, listLoadingMore, posts.length, userList.length]);
 
-    return () => {
-      if (observerTarget.current) observer.unobserve(observerTarget.current);
-    };
-    // 依赖项需包含数据长度或状态变化
-  }, [
-    activeTab, 
-    postsHasMore, postsLoading, postsLoadingMore, posts.length,
-    listHasMore, listLoading, listLoadingMore, userList.length
-  ]);
+  // --- Avatar Upload Logic ---
+  const handleAvatarClick = () => {
+    if (isOwnProfile && !isUploadingAvatar) {
+      avatarInputRef.current?.click();
+    }
+  };
+
+  const handleAvatarChange = async (e: ChangeEvent<HTMLInputElement>) => {
+    const originalFile = e.target.files?.[0];
+    if (!originalFile) return;
+
+    if (!originalFile.type.startsWith('image/')) {
+        toast.error("Please upload an image file");
+        return;
+    }
+    
+    setIsUploadingAvatar(true);
+
+    try {
+        // --- Conversion Logic Step ---
+        const file = await convertToJpegIfNeeded(originalFile);
+
+        if (file.size > 10 * 1024 * 1024) { 
+          toast.error("Image must be smaller than 10MB");
+          setIsUploadingAvatar(false);
+          return;
+        }
+
+        // 1. 上传图片获取 URL
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const uploadRes = await api.post('/upload', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' }
+        });
+
+        if (uploadRes.data.code !== 0) {
+            throw new Error(uploadRes.data.message || 'Upload failed');
+        }
+
+        const newAvatarUrl = uploadRes.data.data[0];
+
+        // 2. 提交更新请求
+        const updatePayload = {
+            avatarUrl: newAvatarUrl
+        };
+
+        const updateRes = await api.put('/set', updatePayload);
+
+        if (updateRes.data.code === 0) {
+            toast.success("Avatar updated!");
+            
+            setMe(prev => {
+                if (!prev) return null;
+                return { ...prev, avatarUrl: newAvatarUrl };
+            });
+
+            setViewedUser(prev => {
+                if (!prev) return null;
+                return { ...prev, avatarUrl: newAvatarUrl };
+            });
+
+            window.dispatchEvent(new Event('user-profile-updated'));
+        } else {
+            toast.error(updateRes.data.message || "Failed to update profile");
+        }
+
+    } catch (error: any) {
+        console.error(error);
+        toast.error(error.message || "Something went wrong");
+    } finally {
+        setIsUploadingAvatar(false);
+        if (avatarInputRef.current) avatarInputRef.current.value = '';
+    }
+  };
 
 
   // --- Event Handlers ---
-  const handleMyNav = (tab: 'profile' | 'following' | 'followers' | 'friends') => {
-    if (!me) {
-      toast.error("Please login first");
-      router.push('/login');
-      return;
-    }
+  const handleMyNav = (tab: typeof activeTab) => {
+    if (!me) { toast.error("Please login first"); router.push('/login'); return; }
     const baseUrl = `/user/${me.id}`;
     if (tab === 'profile') router.push(baseUrl);
     else router.push(`${baseUrl}/${tab}`);
@@ -250,30 +274,26 @@ export default function UserProfileClient({ viewedUserId, activeTab }: UserProfi
 
   const handleFollowToggle = async () => {
     if (!viewedUser) return;
-    const isFollowing = (viewedUser as any).following; 
-    const isFollowedByTarget = (viewedUser as any).followed;
+    const isFollowing = viewedUser.following;
     const url = `/follow/${viewedUserId}`;
-    
     try {
       const res = isFollowing ? await api.delete(url) : await api.post(url);
       if (res.data.code === 0) {
         toast.success(isFollowing ? 'Unfollowed' : 'Followed');
+        // 乐观更新 UI
         setViewedUser(prev => {
           if (!prev) return null;
-          const friendChange = isFollowedByTarget ? (isFollowing ? -1 : 1) : 0;
           return {
             ...prev,
             following: !isFollowing,
             followerCount: prev.followerCount + (isFollowing ? -1 : 1),
-            friendCount: prev.friendCount + friendChange 
-          } as any;
+            // 注意：好友逻辑通常较复杂，此处仅做简单跟随数更新
+          };
         });
       } else {
         toast.error(res.data.message);
       }
-    } catch (error) {
-      toast.error('Action failed');
-    }
+    } catch (error) { toast.error('Action failed'); }
   };
 
   const handleLogout = () => {
@@ -282,51 +302,21 @@ export default function UserProfileClient({ viewedUserId, activeTab }: UserProfi
     router.push('/login');
   };
 
-  const navigateToSettings = () => {
-    if (me) router.push('/set');
-  };
+  const navigateToSettings = () => { if (me) router.push('/set'); };
 
   const handlePostCreated = (newPost: Post) => {
-    // 1. 更新列表
     setPosts([newPost, ...posts]);
-  
-    // 2. 更新总数 (+1)
-    setViewedUser(prev => {
-      if (!prev) return null;
-      return {
-        ...prev,
-        postCount: (prev.postCount || 0) + 1
-      };
-    });
+    setViewedUser(prev => prev ? ({ ...prev, postCount: prev.postCount + 1 }) : null);
   };
 
   const handlePostDeleted = (postId: number) => {
-    // 1. 更新列表
     setPosts(posts.filter(p => p.id !== postId));
-
-    // 2. 更新总数 (-1)
-    setViewedUser(prev => {
-      if (!prev) return null;
-      return {
-        ...prev,
-        postCount: Math.max(0, (prev.postCount || 0) - 1)
-      };
-    });
+    setViewedUser(prev => prev ? ({ ...prev, postCount: Math.max(0, prev.postCount - 1) }) : null);
   };
   
   const getSidebarItemClass = (targetTab: string) => {
     const isActive = isOwnProfile && activeTab === targetTab;
-    const baseClass = "flex items-center w-full px-4 py-3 text-sm font-medium rounded-lg transition-colors duration-200 cursor-pointer mb-1";
-    return isActive 
-      ? `${baseClass} bg-blue-50 text-blue-700 border-l-4 border-blue-600` 
-      : `${baseClass} text-gray-600 hover:bg-gray-100 hover:text-gray-900`;
-  };
-
-  const getListTitle = () => {
-    if (activeTab === 'following') return 'Following';
-    if (activeTab === 'followers') return 'Followers';
-    if (activeTab === 'friends') return 'Friends';
-    return '';
+    return `flex items-center w-full px-4 py-3 text-sm font-medium rounded-lg transition-colors duration-200 cursor-pointer mb-1 ${isActive ? 'bg-blue-50 text-blue-700 border-l-4 border-blue-600' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`;
   };
 
   // --- Render Helpers ---
@@ -334,30 +324,17 @@ export default function UserProfileClient({ viewedUserId, activeTab }: UserProfi
   const renderUserList = () => {
     if (listLoading) return <div className="p-10 text-center flex justify-center"><Loader2 className="animate-spin text-gray-500" /></div>;
     if (userList.length === 0) return <div className="p-10 text-center text-gray-500">No users found.</div>;
-
     return (
       <div className="divide-y divide-gray-100">
         {userList.map((item) => (
-          <div 
-            key={item.id} 
-            className="flex items-center justify-between p-4 hover:bg-gray-50 transition-colors cursor-pointer"
-            onClick={() => router.push(`/user/${item.id}`)}
-          >
+          <div key={item.id} className="flex items-center justify-between p-4 hover:bg-gray-50 transition-colors cursor-pointer" onClick={() => router.push(`/user/${item.id}`)}>
             <div className="flex items-center space-x-4">
-              <img 
-                src={item.avatarUrl || "/default-avatar.png"} 
-                alt={item.username} 
-                className="w-12 h-12 rounded-full object-cover" 
-              />
-              <div>
-                <h4 className="text-sm font-semibold text-gray-900">{item.username}</h4>
-                <p className="text-xs text-gray-500 line-clamp-1">{item.bio || 'No bio'}</p>
-              </div>
+              <img src={item.avatarUrl || "/default-avatar.png"} alt={item.username} className="w-12 h-12 rounded-full object-cover" />
+              <div><h4 className="text-sm font-semibold text-gray-900">{item.username}</h4><p className="text-xs text-gray-500 line-clamp-1">{item.bio || 'No bio'}</p></div>
             </div>
             <div className="text-xs text-gray-400">View</div>
           </div>
         ))}
-        {/* User List Sentinel */}
         <div ref={observerTarget} className="py-4 flex justify-center h-16">
            {listLoadingMore && <Loader2 className="animate-spin text-gray-400" size={20}/>}
            {!listHasMore && userList.length > 0 && <span className="text-xs text-gray-300">End of list</span>}
@@ -369,18 +346,46 @@ export default function UserProfileClient({ viewedUserId, activeTab }: UserProfi
   const renderProfileContent = () => {
     return (
       <div className="space-y-6">
+        {/* Hidden Input for Avatar Upload */}
+        <input 
+            type="file" 
+            ref={avatarInputRef} 
+            onChange={handleAvatarChange} 
+            accept="image/*" 
+            className="hidden" 
+        />
+
         <div className="bg-white rounded-xl shadow overflow-hidden animate-in fade-in duration-300">
           <div className="h-32 bg-blue-600"></div>
           <div className="px-6 pb-6">
             {/* Header / Avatar Section */}
             <div className="relative flex justify-between items-end -mt-12 mb-6">
-              <div className="relative">
+              <div 
+                className={`relative group ${isOwnProfile ? 'cursor-pointer' : ''}`}
+                onClick={handleAvatarClick}
+              >
+                {/* Avatar Image */}
                 <img 
                   src={viewedUser!.avatarUrl || "/default-avatar.png"} 
                   alt={viewedUser!.username}
-                  className="w-24 h-24 rounded-full border-4 border-white bg-white object-cover"
+                  className={`w-24 h-24 rounded-full border-4 border-white bg-white object-cover transition-opacity ${isUploadingAvatar ? 'opacity-50' : ''}`}
                 />
+                
+                {/* Loading Spinner Overlay */}
+                {isUploadingAvatar && (
+                    <div className="absolute inset-0 flex items-center justify-center z-20">
+                        <Loader2 className="animate-spin text-blue-600 w-8 h-8" />
+                    </div>
+                )}
+
+                {/* Hover Camera Icon (Only for Owner & Not Loading) */}
+                {isOwnProfile && !isUploadingAvatar && (
+                    <div className="absolute inset-0 rounded-full flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity z-10 border-4 border-transparent">
+                        <Camera className="text-white w-8 h-8" />
+                    </div>
+                )}
               </div>
+
               <div className="flex space-x-3">
                 {isOwnProfile ? (
                   <>
@@ -390,13 +395,9 @@ export default function UserProfileClient({ viewedUserId, activeTab }: UserProfi
                 ) : (
                   <button 
                     onClick={handleFollowToggle}
-                    className={`flex items-center px-4 py-2 rounded text-sm font-medium transition-colors ${
-                      (viewedUser as any).following 
-                        ? "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                        : "bg-blue-600 text-white hover:bg-blue-700"
-                    }`}
+                    className={`flex items-center px-4 py-2 rounded text-sm font-medium transition-colors ${viewedUser!.following ? "bg-gray-100 text-gray-700 hover:bg-gray-200" : "bg-blue-600 text-white hover:bg-blue-700"}`}
                   >
-                    {(viewedUser as any).following ? <><UserMinus size={16} className="mr-2"/> Unfollow</> : <><UserPlus size={16} className="mr-2"/> Follow</>}
+                    {viewedUser!.following ? <><UserMinus size={16} className="mr-2"/> Unfollow</> : <><UserPlus size={16} className="mr-2"/> Follow</>}
                   </button>
                 )}
               </div>
@@ -408,19 +409,15 @@ export default function UserProfileClient({ viewedUserId, activeTab }: UserProfi
                 <h1 className="text-2xl font-bold text-gray-900">{viewedUser!.username}</h1>
                 <p className="text-sm text-gray-500">Joined: {viewedUser!.joinDate}</p>
               </div>
-              
               <div className="flex items-center gap-6 pb-1">
                 <div className="cursor-pointer hover:text-blue-600 transition-colors flex items-baseline gap-1" onClick={() => router.push(`/user/${viewedUserId}/following`)}>
-                  <span className="text-lg font-bold text-gray-900">{viewedUser!.followCount}</span>
-                  <span className="text-sm text-gray-500">Following</span>
+                  <span className="text-lg font-bold text-gray-900">{viewedUser!.followCount}</span><span className="text-sm text-gray-500">Following</span>
                 </div>
                 <div className="cursor-pointer hover:text-blue-600 transition-colors flex items-baseline gap-1" onClick={() => router.push(`/user/${viewedUserId}/followers`)}>
-                  <span className="text-lg font-bold text-gray-900">{viewedUser!.followerCount}</span>
-                  <span className="text-sm text-gray-500">Followers</span>
+                   <span className="text-lg font-bold text-gray-900">{viewedUser!.followerCount}</span><span className="text-sm text-gray-500">Followers</span>
                 </div>
                 <div className="cursor-pointer hover:text-blue-600 transition-colors flex items-baseline gap-1" onClick={() => router.push(`/user/${viewedUserId}/friends`)}>
-                  <span className="text-lg font-bold text-gray-900">{viewedUser!.friendCount}</span>
-                  <span className="text-sm text-gray-500">Friends</span>
+                   <span className="text-lg font-bold text-gray-900">{viewedUser!.friendCount}</span><span className="text-sm text-gray-500">Friends</span>
                 </div>
               </div>
             </div>
@@ -433,28 +430,15 @@ export default function UserProfileClient({ viewedUserId, activeTab }: UserProfi
 
         {isOwnProfile && <CreatePostWidget onPostCreated={handlePostCreated} />}
 
-        {/* Posts List */}
         <div>
-          <h3 className="text-lg font-bold text-gray-900 mb-4 px-1">
-            Posts ({viewedUser?.postCount ?? 0})
-          </h3>
+          <h3 className="text-lg font-bold text-gray-900 mb-4 px-1">Posts ({viewedUser?.postCount ?? 0})</h3>
           {postsLoading ? (
              <div className="p-10 text-center flex justify-center"><Loader2 className="animate-spin text-gray-500" /></div>
           ) : posts.length === 0 ? (
-            <div className="bg-white rounded-xl p-8 text-center text-gray-500 shadow">
-              <p>No posts yet.</p>
-            </div>
+            <div className="bg-white rounded-xl p-8 text-center text-gray-500 shadow"><p>No posts yet.</p></div>
           ) : (
             <>
-              {posts.map(post => (
-                <PostCard 
-                  key={post.id} 
-                  post={post} 
-                  currentUserId={me?.id ? String(me.id) : null} 
-                  onDelete={handlePostDeleted}
-                />
-              ))}
-              {/* Post List Sentinel */}
+              {posts.map(post => (<PostCard key={post.id} post={post} currentUserId={me?.id ? String(me.id) : null} onDelete={handlePostDeleted}/>))}
               <div ref={observerTarget} className="py-4 flex justify-center h-16">
                  {postsLoadingMore && <Loader2 className="animate-spin text-gray-400" size={20}/>}
                  {!postsHasMore && <span className="text-xs text-gray-300">No more posts</span>}
@@ -467,56 +451,32 @@ export default function UserProfileClient({ viewedUserId, activeTab }: UserProfi
   };
 
 
-  // --- Main Render ---
-
   return (
     <>
       <Navbar />
-
       <div className="min-h-screen bg-gray-50 pt-20 pb-10">
-        
         {profileLoading ? (
-           <div className="p-10 text-center flex justify-center items-center h-64">
-             <Loader2 className="animate-spin mr-2 text-blue-600" /> Loading profile...
-           </div>
+           <div className="p-10 text-center flex justify-center items-center h-64"><Loader2 className="animate-spin mr-2 text-blue-600" /> Loading profile...</div>
         ) : !viewedUser ? (
            <div className="p-10 text-center">User not found</div>
         ) : (
           <div className="max-w-6xl mx-auto px-4 flex flex-col md:flex-row gap-6">
-            
             <aside className="w-full md:w-64 flex-shrink-0">
               <div className="bg-white rounded-xl shadow p-4 sticky top-24">
                 <h2 className="px-4 pb-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">My Account</h2>
                 <nav className="space-y-1">
-                  <button onClick={() => handleMyNav('profile')} className={getSidebarItemClass('profile')}>
-                    <Layout size={18} className="mr-3" />
-                    My Profile
-                  </button>
-                  <button onClick={() => handleMyNav('following')} className={getSidebarItemClass('following')}>
-                    <Users size={18} className="mr-3" />
-                    My Following
-                  </button>
-                  <button onClick={() => handleMyNav('followers')} className={getSidebarItemClass('followers')}>
-                    <Heart size={18} className="mr-3" />
-                    My Followers
-                  </button>
-                  <button onClick={() => handleMyNav('friends')} className={getSidebarItemClass('friends')}>
-                    <UserCheck size={18} className="mr-3" />
-                    My Friends
-                  </button>
+                  <button onClick={() => handleMyNav('profile')} className={getSidebarItemClass('profile')}><Layout size={18} className="mr-3" />My Profile</button>
+                  <button onClick={() => handleMyNav('following')} className={getSidebarItemClass('following')}><Users size={18} className="mr-3" />My Following</button>
+                  <button onClick={() => handleMyNav('followers')} className={getSidebarItemClass('followers')}><Heart size={18} className="mr-3" />My Followers</button>
+                  <button onClick={() => handleMyNav('friends')} className={getSidebarItemClass('friends')}><UserCheck size={18} className="mr-3" />My Friends</button>
                 </nav>
               </div>
             </aside>
-
             <main className="w-full max-w-2xl">
-              {activeTab === 'profile' ? (
-                renderProfileContent()
-              ) : (
+              {activeTab === 'profile' ? renderProfileContent() : (
                 <div className="bg-white rounded-xl shadow overflow-hidden min-h-[400px] animate-in fade-in duration-300">
                   <div className="px-6 py-4 border-b border-gray-100">
-                    <h3 className="text-lg font-bold text-gray-900">
-                      {getListTitle()}
-                    </h3>
+                    <h3 className="text-lg font-bold text-gray-900">{activeTab === 'following' ? 'Following' : activeTab === 'followers' ? 'Followers' : 'Friends'}</h3>
                   </div>
                   {renderUserList()}
                 </div>

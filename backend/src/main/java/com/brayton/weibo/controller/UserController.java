@@ -29,7 +29,7 @@ public class UserController {
         return ResponseEntity.ok(ApiResponse.success(data));
     }
 
-    @GetMapping("user/{id}")
+    @GetMapping("/user/{id}")
     public ResponseEntity<ApiResponse<?>> getUserById(@AuthenticationPrincipal CustomUserDetails self, @PathVariable long id) {
         UserResponse userResponse = userService.getUserInfoById(id, self.getId());
         return ResponseEntity.ok(ApiResponse.success(userResponse));

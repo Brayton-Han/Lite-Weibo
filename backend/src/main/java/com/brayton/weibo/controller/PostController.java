@@ -5,15 +5,18 @@ import com.brayton.weibo.dto.ApiResponse;
 import com.brayton.weibo.dto.CreatePostRequest;
 import com.brayton.weibo.dto.PostResponse;
 import com.brayton.weibo.dto.PostUpdateRequest;
-import com.brayton.weibo.entity.Post;
+import com.brayton.weibo.enums.PostVisibility;
+import com.brayton.weibo.service.FileService;
 import com.brayton.weibo.service.PostService;
+import jakarta.validation.Valid;
 import lombok.AllArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.core.userdetails.ReactiveUserDetailsPasswordService;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
-import java.util.ArrayList;
 import java.util.List;
 
 @Controller
@@ -71,8 +74,11 @@ public class PostController {
     }
 
     @PostMapping("/posts")
-    public ResponseEntity<ApiResponse<?>> post(@AuthenticationPrincipal CustomUserDetails user, @RequestBody CreatePostRequest post) {
-        PostResponse newPost = postService.createPost(user.getId(), post);
+    public ResponseEntity<ApiResponse<?>> createPost(
+            @AuthenticationPrincipal CustomUserDetails user,
+            @RequestBody @Valid CreatePostRequest request
+    ) {
+        PostResponse newPost = postService.createPost(user.getId(), request);
         return ResponseEntity.ok(ApiResponse.success(newPost));
     }
 

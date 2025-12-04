@@ -13,11 +13,15 @@ export default function Navbar() {
   const [me, setMe] = useState<User | null>(null);
 
   useEffect(() => {
+    // 定义获取用户信息的函数
     const fetchMe = async () => {
       const myId = localStorage.getItem('userId');
       const token = localStorage.getItem('token');
       
-      if (!myId || !token) return;
+      if (!myId || !token) {
+        setMe(null); // 如果没有 token，清空状态
+        return;
+      }
 
       try {
         const res = await api.get<ApiResponse<User>>(`/user/${myId}`);
@@ -29,21 +33,34 @@ export default function Navbar() {
       }
     };
 
+    // 1. 组件加载时获取一次
     fetchMe();
-  }, []);
 
-  // 辅助函数：生成图标的样式类
-  // 更加明显的样式：选中时添加背景色 (bg-blue-100) 和更深的文字颜色
+    // 2. 监听自定义事件 'user-profile-updated'
+    // 当其他组件修改了用户信息时，触发此事件，Navbar 重新拉取数据
+    const handleUserUpdate = () => {
+      fetchMe();
+    };
+    
+    window.addEventListener('user-profile-updated', handleUserUpdate);
+    
+    // 同时也监听 storage 事件（处理多标签页登出/登录的情况）
+    window.addEventListener('storage', handleUserUpdate);
+
+    // 3. 清理监听器
+    return () => {
+      window.removeEventListener('user-profile-updated', handleUserUpdate);
+      window.removeEventListener('storage', handleUserUpdate);
+    };
+  }, []); // 依赖项保持为空
+
+  // ... (getIconClass 和 return 部分保持不变，不需要改动)
   const getIconClass = (targetPath: string) => {
     const isActive = pathname === targetPath;
-    
     const baseClass = "transition-all duration-200 p-2 rounded-full";
-    
     if (isActive) {
-      // 高亮状态：蓝色背景 + 蓝色图标 + 稍微加粗
       return `${baseClass} bg-blue-100 text-blue-700 shadow-sm`;
     } else {
-      // 默认状态：灰色图标 + 悬停灰色背景
       return `${baseClass} text-gray-500 hover:bg-gray-100 hover:text-blue-600`;
     }
   };
@@ -51,34 +68,19 @@ export default function Navbar() {
   return (
     <nav className="fixed top-0 left-0 right-0 h-16 bg-white border-b border-gray-200 z-50 px-4 shadow-sm">
       <div className="max-w-6xl mx-auto h-full flex items-center justify-between">
-        
-        {/* Logo / Brand */}
         <div className="flex items-center cursor-pointer" onClick={() => router.push('/')}>
           <span className="text-xl font-bold text-blue-600 tracking-tight">Lite Weibo</span>
         </div>
 
-        {/* Right Actions */}
         <div className="flex items-center space-x-6">
-          
-          {/* 1. Search Icon */}
-          <button 
-            onClick={() => router.push('/search')}
-            className={getIconClass('/search')}
-            title="Search"
-          >
+          <button onClick={() => router.push('/search')} className={getIconClass('/search')} title="Search">
             <Search size={24} strokeWidth={pathname === '/search' ? 2.5 : 2} />
           </button>
 
-          {/* 3. House (Home) Icon */}
-          <button 
-            onClick={() => router.push('/')}
-            className={getIconClass('/')}
-            title="Home"
-          >
+          <button onClick={() => router.push('/')} className={getIconClass('/')} title="Home">
             <Home size={24} strokeWidth={pathname === '/' ? 2.5 : 2} />
           </button>
 
-          {/* 2. Avatar / User Profile */}
           {me ? (
             <div 
               onClick={() => router.push(`/user/${me.id}`)}
@@ -88,11 +90,10 @@ export default function Navbar() {
               <img 
                 src={me.avatarUrl || "/default-avatar.png"} 
                 alt={me.username} 
-                // 头像高亮：使用 Ring (外圈) 效果，非常显眼
                 className={`w-9 h-9 rounded-full object-cover transition-all duration-200 ${
                   pathname === `/user/${me.id}`
-                    ? 'ring-2 ring-blue-600 ring-offset-2' // 高亮：双层蓝圈
-                    : 'border border-gray-200 group-hover:border-blue-400' // 默认：灰色边框
+                    ? 'ring-2 ring-blue-600 ring-offset-2'
+                    : 'border border-gray-200 group-hover:border-blue-400'
                 }`}
               />
             </div>
@@ -109,7 +110,6 @@ export default function Navbar() {
               <span>Login</span>
             </button>
           )}
-
         </div>
       </div>
     </nav>

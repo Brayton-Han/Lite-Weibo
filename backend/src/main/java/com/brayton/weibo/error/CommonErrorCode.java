@@ -24,6 +24,9 @@ public enum CommonErrorCode implements ErrorCode {
     TOKEN_EXPIRED(2001, "Token expired"),
 
     VALIDATION_FAILED(4001, "validation failed"),
+    FILE_LIST_NULL(4002, "file list is null"),
+    PICTURE_MAX_NINE(4003, "you can only upload 9 pictures"),
+    R2_UPLOAD_FAILED(4004, "R2 upload failed"),
     
     INTERNAL_ERROR(5000, "internal error"),;
 

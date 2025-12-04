@@ -101,7 +101,7 @@ public class UserService {
 
         // 2. 处理用户名变更逻辑
         // 如果前端传来的用户名和数据库里存的不一样，说明用户想改名
-        if (!user.getUsername().equals(info.getUsername())) {
+        if (info.getUsername() != null && !user.getUsername().equals(info.getUsername())) {
             // 必须检查新名字是否已经被其他人占用了
             Optional<User> existingUser = userRepository.findByUsername(info.getUsername());
             if (existingUser.isPresent()) {
@@ -111,10 +111,14 @@ public class UserService {
         }
 
         // 3. 更新其他基础信息
-        user.setAvatarUrl(info.getAvatarUrl());
-        user.setGender(info.getGender());
-        user.setBio(info.getBio());
-        user.setBirthday(info.getBirthday());
+        if (info.getAvatarUrl() != null)
+            user.setAvatarUrl(info.getAvatarUrl());
+        if (info.getGender() != null)
+            user.setGender(info.getGender());
+        if (info.getBio() != null)
+            user.setBio(info.getBio());
+        if (info.getBirthday() != null)
+            user.setBirthday(info.getBirthday());
 
         // 4. 保存更改
         userRepository.save(user);
