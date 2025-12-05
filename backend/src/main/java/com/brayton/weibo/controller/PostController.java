@@ -63,6 +63,12 @@ public class PostController {
         return ResponseEntity.ok(ApiResponse.success(posts));
     }
 
+    @GetMapping("/posts/following")
+    public ResponseEntity<ApiResponse<?>> getFollowingPosts(@AuthenticationPrincipal CustomUserDetails self) {
+        List<PostResponse> posts = postService.getFollowingPosts(self.getId());
+        return ResponseEntity.ok(ApiResponse.success(posts));
+    }
+
     @GetMapping("/posts/friends")
     public ResponseEntity<ApiResponse<?>> getFriendPosts(
             @RequestParam(required = false) Long lastId,

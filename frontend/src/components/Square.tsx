@@ -62,11 +62,12 @@ export default function Square({ currentTab }: SquareProps) {
 
       // 修改点 3: 根据 Tab 类型决定传 cursor 还是 lastId
       if (cursorParam) {
+        // 修改点: 将 following 加入 cursor 逻辑
         if (currentTab === 'newest') {
-          // Redis 模式：传 cursor (时间戳)
+          // Redis 模式 / Following 模式：传 cursor (时间戳)
           params.append('cursor', cursorParam.toString());
         } else {
-          // DB 模式 (关注/好友)：传 lastId
+          // Friends 模式 (DB)：传 lastId
           params.append('lastId', cursorParam.toString());
         }
       }
@@ -76,10 +77,16 @@ export default function Square({ currentTab }: SquareProps) {
       if (res.data.code === 0) {
         const newPosts = res.data.data || [];
         
-        if (newPosts.length < PAGE_SIZE) {
+        // 如果是 following，强制设置 hasMore 为 false，停止分页
+        if (currentTab === 'following') {
           setHasMore(false);
         } else {
-          setHasMore(true);
+          // 其他 Tab 保持原有的分页判断逻辑
+          if (newPosts.length < PAGE_SIZE) {
+            setHasMore(false);
+          } else {
+            setHasMore(true);
+          }
         }
 
         if (isInit) {
@@ -125,18 +132,16 @@ export default function Square({ currentTab }: SquareProps) {
 
   // --- Handlers: Load More (逻辑封装) ---
   const handleLoadMore = () => {
-    if (loadingMore || !hasMore || posts.length === 0) return;
+    if (loadingMore || !hasMore || posts.length === 0|| currentTab === 'following') return;
     
     const lastPost = posts[posts.length - 1];
 
-    // 修改点 4: 针对 newest 使用 createTime 转时间戳，其他使用 id
     if (currentTab === 'newest') {
-      // 假设 Post 类型中有 createTime 字段 (如果是字符串需转 number)
-      // 如果后端返回的是 long 类型时间戳，直接用；如果是 ISO String，需 new Date().getTime()
-      // 这里为了稳健，尝试转为 timestamp
+      // 使用 createTime 转时间戳
       const cursor = new Date(lastPost.createdAt).getTime(); 
       fetchPosts(false, cursor);
     } else {
+      // Friends 仍然使用 ID
       fetchPosts(false, lastPost.id);
     }
   };
@@ -193,7 +198,7 @@ export default function Square({ currentTab }: SquareProps) {
               </button>
               <button onClick={() => handleNav('following')} className={getSidebarItemClass('following')}>
                 <UserCheck size={18} className="mr-3" />
-                All Follows
+                Following
               </button>
             </nav>
           </div>

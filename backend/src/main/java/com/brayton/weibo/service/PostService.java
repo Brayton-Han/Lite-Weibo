@@ -1,5 +1,6 @@
 package com.brayton.weibo.service;
 
+import com.brayton.weibo.common.FeedRandomizer;
 import com.brayton.weibo.common.TimeUtil;
 import com.brayton.weibo.dto.CreatePostRequest;
 import com.brayton.weibo.dto.PostResponse;
@@ -57,7 +58,7 @@ public class PostService {
 
 
 
-    // !!! ONLY USE FOR NEWEST POST TIMELINE !!!
+    // !!! ONLY USE FOR NEWEST/FOLLOWING POST TIMELINE !!!
     private boolean isVisibleToUser(Post post, boolean self, boolean following, boolean followed) {
         // 自己永远能看到自己的帖子
         if (self) return true;
@@ -99,6 +100,51 @@ public class PostService {
         }
 
         return result;
+    }
+
+    public List<PostResponse> getFollowingPosts(Long userId) {
+
+        String key = "feed:" + userId;
+
+        // Step 1: Redis 随机抽样
+        int size = 20;
+        int sampleCount = size * 3;
+        List<Long> ids = redisService.getRandomZSetMembers(key, sampleCount);
+        if (ids.isEmpty()) return Collections.emptyList();
+
+        // Step 2: DB 批量查
+        List<Post> posts = postRepository.findByIdIn(ids);
+        if (posts.isEmpty()) return Collections.emptyList();
+
+        // Step 3: 可见性过滤
+        List<PostResponse> visiblePosts = new ArrayList<>();
+        for (Post p : posts) {
+            Long authorId = p.getUser().getId();
+
+            boolean self = authorId.equals(userId);
+            if (self) continue;
+            boolean following = followRepository.existsByFollowerIdAndFollowingId(userId, authorId);
+            boolean followed = followRepository.existsByFollowerIdAndFollowingId(authorId, userId);
+
+            if (isVisibleToUser(p, false, following, followed)) {
+                visiblePosts.add(buildPostResponse(p, userId, true, followed));
+            }
+        }
+
+        if (visiblePosts.isEmpty()) return Collections.emptyList();
+
+        // Step 4: 作者均衡（FeedRandomizer）
+        FeedRandomizer randomizer = new FeedRandomizer(
+                2,      // 每个作者至少 2 条
+                0.3,    // 多出的概率
+                0.5     // 衰减因子
+        );
+
+        return randomizer.select(
+                visiblePosts,
+                post -> post.getUser().getId(),
+                size
+        );
     }
 
     static public List<PostVisibility> visibilityFilter(boolean self, boolean following, boolean followed) {

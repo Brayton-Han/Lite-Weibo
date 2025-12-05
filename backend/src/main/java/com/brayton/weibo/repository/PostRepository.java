@@ -29,6 +29,8 @@ public interface PostRepository extends JpaRepository<Post, Long> {
             Pageable pageable
     );
 
+    List<Post> findByIdIn(List<Long> postIds);
+
     List<Post> findByIdInOrderByCreatedAtDesc(Set<Object> postIds);
 
     @Modifying
