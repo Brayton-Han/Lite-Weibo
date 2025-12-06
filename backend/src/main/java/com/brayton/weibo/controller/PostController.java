@@ -19,7 +19,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 
-@Controller
+@RestController
 @AllArgsConstructor
 public class PostController {
 
@@ -86,17 +86,5 @@ public class PostController {
     ) {
         PostResponse newPost = postService.createPost(user.getId(), request);
         return ResponseEntity.ok(ApiResponse.success(newPost));
-    }
-
-    @PostMapping("/posts/{pid}/like")
-    public ResponseEntity<ApiResponse<?>> postLike(@AuthenticationPrincipal CustomUserDetails user, @PathVariable long pid) {
-        postService.likePost(user.getId(), pid);
-        return ResponseEntity.ok(ApiResponse.success("Successfully liked post"));
-    }
-
-    @DeleteMapping("/posts/{pid}/like")
-    public ResponseEntity<ApiResponse<?>> unlikePost(@AuthenticationPrincipal CustomUserDetails user, @PathVariable long pid) {
-        postService.unlikePost(user.getId(), pid);
-        return ResponseEntity.ok(ApiResponse.success("Unliked"));
     }
 }

@@ -2,10 +2,7 @@ package com.brayton.weibo.service;
 
 import com.brayton.weibo.common.FeedRandomizer;
 import com.brayton.weibo.common.TimeUtil;
-import com.brayton.weibo.dto.CreatePostRequest;
-import com.brayton.weibo.dto.PostResponse;
-import com.brayton.weibo.dto.PostUpdateRequest;
-import com.brayton.weibo.dto.UserResponse;
+import com.brayton.weibo.dto.*;
 import com.brayton.weibo.entity.Like;
 import com.brayton.weibo.entity.Post;
 import com.brayton.weibo.entity.User;
@@ -20,6 +17,7 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -58,7 +56,7 @@ public class PostService {
 
 
 
-    // !!! ONLY USE FOR NEWEST/FOLLOWING POST TIMELINE !!!
+    // !!! USE FOR NEWEST/FOLLOWING/LIKED POST TIMELINE !!!
     private boolean isVisibleToUser(Post post, boolean self, boolean following, boolean followed) {
         // 自己永远能看到自己的帖子
         if (self) return true;
@@ -147,6 +145,48 @@ public class PostService {
         );
     }
 
+    public LikedPostsResponse getLikedPosts(Long userId, Long lastTimestamp, int size) {
+
+        long cursor = lastTimestamp == null ? Long.MAX_VALUE : lastTimestamp;
+        List<PostResponse> result = new ArrayList<>();
+
+        while (result.size() < size) {
+            Set<Object> postIds = redisService.getLikedAfter(userId, cursor, size);
+            if (postIds.isEmpty()) break;
+
+            List<Post> posts = postRepository.findByIdIn(postIds);
+            Map<Long, Post> map = posts.stream()
+                    .collect(Collectors.toMap(Post::getId, p -> p));
+
+            List<Post> ordered = postIds.stream()
+                    .map(id -> map.get(Long.valueOf(id.toString())))
+                    .filter(Objects::nonNull)
+                    .toList();
+
+            for (Post post : ordered) {
+                if (result.size() >= size) break;
+
+                Like like = likeRepository.findByUserIdAndPostId(userId, post.getId())
+                        .orElse(null);
+                if (like == null) continue;
+
+                Long authorId = post.getUser().getId();
+                boolean sameUser = authorId.equals(userId);
+                boolean following = sameUser || followRepository.existsByFollowerIdAndFollowingId(userId, authorId);
+                boolean followed = sameUser || followRepository.existsByFollowerIdAndFollowingId(authorId, userId);
+
+                if (isVisibleToUser(post, sameUser, following, followed)) {
+                    result.add(buildPostResponse(post, userId, following, followed));
+                }
+
+                cursor = TimeUtil.toTs(like.getCreatedAt());
+            }
+        }
+
+        return new LikedPostsResponse(result, cursor);
+    }
+
+    // !!! USER FOR USER_PAGE/FRIENDS POST
     static public List<PostVisibility> visibilityFilter(boolean self, boolean following, boolean followed) {
 
         if (self)
@@ -196,6 +236,15 @@ public class PostService {
 
 
 
+    @Async
+    public void updateLikedPost(Like like) {
+        redisService.addToLiked(
+                like.getUserId(),
+                like.getPostId(),
+                TimeUtil.toTs(like.getCreatedAt())
+        );
+    }
+
     @Transactional
     public void likePost(Long userId, Long postId) {
 
@@ -206,10 +255,12 @@ public class PostService {
         Like like = new Like();
         like.setUserId(userId);
         like.setPostId(postId);
-        likeRepository.save(like);
+        Like saved = likeRepository.save(like);
 
         // 更新 Post 的 likeCount
         postRepository.incrementLikeCount(postId);
+
+        updateLikedPost(saved);
     }
 
     @Transactional
@@ -316,6 +367,9 @@ public class PostService {
         }
         if (req.getContent() != null) {
             post.setContent(req.getContent());
+        }
+        if (req.getImages() != null) {
+            post.setImages(req.getImages());
         }
 
         post.setEdited(true);

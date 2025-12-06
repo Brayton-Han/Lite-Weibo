@@ -21,6 +21,8 @@ public enum CommonErrorCode implements ErrorCode {
     COMMENT_NOT_FOUND(1600, "comment not found"),
     COMMENT_CANT_DELETE(1601, "can't delete comment"),
 
+    LIKE_NOT_FOUND(1700, "like record not found"),
+
     TOKEN_EXPIRED(2001, "Token expired"),
 
     VALIDATION_FAILED(4001, "validation failed"),

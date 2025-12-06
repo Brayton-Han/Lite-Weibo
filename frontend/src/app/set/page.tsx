@@ -137,56 +137,65 @@ export default function SettingsPage() {
 
   // 5. 保存总逻辑
   const handleSave = async () => {
-    if (!user) return;
-    if (!formData.username.trim()) {
-        toast.error("Username is required");
-        return;
-    }
-    
-    setIsSaving(true);
+  if (!user) return;
+  if (!formData.username.trim()) {
+      toast.error("Username is required");
+      return;
+  }
+  
+  setIsSaving(true);
 
-    try {
-      let finalAvatarUrl = formData.avatarUrl; // 默认使用旧头像或已输入的URL
+  try {
+    let finalAvatarUrl = formData.avatarUrl;
 
-      // Step 1: 如果用户选了新图片，先上传
-      if (selectedFile) {
-        try {
-          // selectedFile is already converted to JPEG if needed
-          finalAvatarUrl = await uploadAvatarImage(selectedFile);
-        } catch (uploadError: any) {
-          toast.error(uploadError.message || "Failed to upload avatar");
-          setIsSaving(false);
-          return; // 图片上传失败则中断后续保存
-        }
+    // 1. 上传图片 (这部分逻辑没问题)
+    if (selectedFile) {
+      try {
+        finalAvatarUrl = await uploadAvatarImage(selectedFile);
+      } catch (uploadError: any) {
+        toast.error(uploadError.message || "Failed to upload avatar");
+        setIsSaving(false);
+        return; // 图片上传失败则终止
       }
-
-      // Step 2: 组装最终数据并更新 User
-      const updatePayload = {
-          ...formData,
-          avatarUrl: finalAvatarUrl
-      };
-
-      const res = await api.put<ApiResponse<string>>('/set', updatePayload);
-      const response = res.data;
-
-      if (response.code === 0) {
-        toast.success(response.message || 'Profile updated successfully');
-        
-        // 清理预览资源
-        if (previewUrl) URL.revokeObjectURL(previewUrl);
-        
-        // 跳转回个人主页
-        router.push(`/user/${user.id}`);
-      } else {
-        toast.error(response.message || 'Failed to update profile');
-      }
-    } catch (error) {
-      console.error(error);
-      toast.error('Failed to save profile');
-    } finally {
-      setIsSaving(false);
     }
-  };
+
+    // 2. 关键修复：清洗数据 (Payload Sanitization)
+    // 将空字符串转换为 null，避免后端解析 Date/Enum 报错
+    const updatePayload = {
+        username: formData.username,
+        bio: formData.bio,
+        avatarUrl: finalAvatarUrl,
+        // 如果是空字符串，传 null (或者 undefined，取决于你的 axios 配置和后端需求)
+        gender: formData.gender === '' ? null : formData.gender,
+        birthday: formData.birthday === '' ? null : formData.birthday
+    };
+
+    // 或者，如果你只想发送有值的字段 (更安全)：
+    // const cleanPayload: any = { ...updatePayload };
+    // if (!cleanPayload.gender) delete cleanPayload.gender;
+    // if (!cleanPayload.birthday) delete cleanPayload.birthday;
+
+    const res = await api.put<ApiResponse<string>>('/set', updatePayload);
+    const response = res.data;
+
+    if (response.code === 0) {
+      toast.success(response.message || 'Profile updated successfully');
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      
+      // 触发全局事件，确保 Navbar 等组件也能更新头像 (就像 UserProfileClient 做的那样)
+      window.dispatchEvent(new Event('user-profile-updated'));
+
+      router.push(`/user/${user.id}`);
+    } else {
+      toast.error(response.message || 'Failed to update profile');
+    }
+  } catch (error) {
+    console.error(error);
+    toast.error('Failed to save profile');
+  } finally {
+    setIsSaving(false);
+  }
+};
 
   const handleCancel = () => {
     if (user) router.push(`/user/${user.id}`);

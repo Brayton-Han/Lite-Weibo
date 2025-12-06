@@ -72,9 +72,20 @@ export interface CreatePostRequest {
   visibility: PostVisibility;
 }
 
+export interface UpdatePostRequest {
+  content: string;
+  images: string[];
+  visibility: PostVisibility;
+}
+
 export interface Comment {
   id: number;
   user: User;
   content: string;
   createdAt: string;
+}
+
+export interface LikedPostsResponse {
+  posts: Post[];
+  nextCursor: number;
 }

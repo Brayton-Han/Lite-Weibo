@@ -3,12 +3,15 @@
 import { Post, Comment, PostVisibility } from '@/types';
 import { 
   Heart, MessageCircle, Share2, Trash2, AlertCircle, Send, 
-  MoreHorizontal, Globe, Lock, Users, UserCheck, Eye, X, Edit 
+  MoreHorizontal, Globe, Lock, Users, UserCheck, Eye, X, Edit,
+  ImagePlus, Loader2 
 } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import { toast } from 'react-hot-toast';
 import api from '@/lib/api';
 import Link from 'next/link';
+// 引入你提供的 EditPostModal 组件
+import EditPostModal from './EditPostModel'; 
 
 interface PostCardProps {
   post: Post;
@@ -19,7 +22,7 @@ interface PostCardProps {
 export default function PostCard({ post, currentUserId, onDelete }: PostCardProps) {
   // --- State: Content & Display ---
   const [displayContent, setDisplayContent] = useState(post.content);
-  // 新增：追踪是否已编辑状态 (初始化为后端返回的值)
+  const [displayImages, setDisplayImages] = useState<string[]>(post.images || []);
   const [isEdited, setIsEdited] = useState(post.edited);
 
   // --- State: Like ---
@@ -31,10 +34,8 @@ export default function PostCard({ post, currentUserId, onDelete }: PostCardProp
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  // --- State: Edit Post Modal ---
+  // --- State: Edit Post Modal (仅控制显示/隐藏) ---
   const [showEditModal, setShowEditModal] = useState(false);
-  const [editContent, setEditContent] = useState(post.content);
-  const [isEditing, setIsEditing] = useState(false);
 
   // --- State: Comments ---
   const [showCommentBox, setShowCommentBox] = useState(false);
@@ -93,45 +94,19 @@ export default function PostCard({ post, currentUserId, onDelete }: PostCardProp
     }
   };
 
-  // --- Handlers: Edit Post Logic ---
+  // --- Handlers: Edit Post Logic (Simplified) ---
   const openEditModal = () => {
-    setEditContent(displayContent);
     setShowEditModal(true);
     setShowMenu(false);
   };
 
-  const handleUpdatePost = async () => {
-    if (!editContent.trim()) {
-      toast.error("Content cannot be empty");
-      return;
-    }
-    
-    if (editContent === displayContent) {
-      setShowEditModal(false);
-      return;
-    }
-
-    setIsEditing(true);
-    try {
-      const res = await api.put(`/posts/${post.id}`, {
-        ...post,
-        content: editContent,
-        visibility: currentVisibility
-      });
-
-      if (res.data.code === 0) {
-        setDisplayContent(editContent);
-        setIsEdited(true); // <--- 更新成功后，将状态设为已编辑
-        toast.success("Post updated successfully");
-        setShowEditModal(false);
-      } else {
-        toast.error(res.data.message || "Failed to update post");
-      }
-    } catch (error) {
-      toast.error("Network error");
-    } finally {
-      setIsEditing(false);
-    }
+  // 当 EditPostModal 完成更新后调用的回调函数
+  const handlePostUpdated = (updatedPost: Post) => {
+    setDisplayContent(updatedPost.content);
+    setDisplayImages(updatedPost.images || []);
+    setCurrentVisibility(updatedPost.visibility); // 同步更新可见性
+    setIsEdited(true);
+    // 这里不需要手动 toast，因为 EditPostModal 内部已经 toast 成功了
   };
 
   // --- Handlers: Visibility Logic ---
@@ -151,6 +126,7 @@ export default function PostCard({ post, currentUserId, onDelete }: PostCardProp
       const res = await api.put(`/posts/${post.id}`, {
         ...post,
         content: displayContent,
+        images: displayImages, 
         visibility: tempVisibility
       });
       if (res.data.code === 0) {
@@ -229,12 +205,12 @@ export default function PostCard({ post, currentUserId, onDelete }: PostCardProp
 
   // --- Render Helpers ---
   const renderImages = () => {
-    if (!post.images || post.images.length === 0) return null;
-    const count = post.images.length;
+    if (!displayImages || displayImages.length === 0) return null;
+    const count = displayImages.length;
     if (count === 1) {
       return (
         <div className="mt-3 rounded-lg overflow-hidden bg-gray-100 border border-gray-100">
-          <img src={post.images[0]} alt="post-img" className="w-full h-auto max-h-[600px] object-contain block hover:opacity-95 transition-opacity cursor-pointer" />
+          <img src={displayImages[0]} alt="post-img" className="w-full h-auto max-h-[600px] object-contain block hover:opacity-95 transition-opacity cursor-pointer" />
         </div>
       );
     }
@@ -243,7 +219,7 @@ export default function PostCard({ post, currentUserId, onDelete }: PostCardProp
     else if (count >= 3) gridClass += ' grid-cols-3';
     return (
       <div className={gridClass}>
-        {post.images.map((img, idx) => (
+        {displayImages.map((img, idx) => (
           <div key={idx} className={`relative ${count === 1 ? 'aspect-video' : 'aspect-square'}`}>
              <img src={img} alt="post-img" className="w-full h-full object-cover bg-gray-100 hover:opacity-95 transition-opacity cursor-pointer" />
           </div>
@@ -292,7 +268,6 @@ export default function PostCard({ post, currentUserId, onDelete }: PostCardProp
                   <span className="mx-1">•</span> 
                   {new Date(post.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
                   
-                  {/* --- 显示 (edited) 标记 --- */}
                   {isEdited && (
                     <span className="ml-1.5 text-gray-400 italic font-normal" title={`Edited at ${new Date(post.updatedAt).toLocaleString()}`}>
                       (edited)
@@ -402,49 +377,25 @@ export default function PostCard({ post, currentUserId, onDelete }: PostCardProp
         )}
       </div>
 
-      {/* --- Modals (Edit, Visibility, Delete) --- */}
-      {/* (此处省略与上文相同的 Modal 代码，请保留原有的 Modal JSX) */}
+      {/* --- Modals --- */}
       
-      {/* Edit Post Modal */}
-      {showEditModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden scale-100 animate-in zoom-in-95 duration-200">
-            <div className="flex justify-between items-center p-4 border-b border-gray-100">
-              <h3 className="text-lg font-medium text-gray-900">Edit Post</h3>
-              <button onClick={() => setShowEditModal(false)} className="text-gray-400 hover:text-gray-600 transition-colors">
-                <X size={20} />
-              </button>
-            </div>
-            
-            <div className="p-4">
-              <textarea
-                value={editContent}
-                onChange={(e) => setEditContent(e.target.value)}
-                className="w-full h-40 p-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-100 focus:bg-white focus:outline-none transition-all resize-none text-gray-800 leading-relaxed"
-                placeholder="What's on your mind?"
-              />
-            </div>
+      {/* NEW: 使用 EditPostModal 组件替换了之前冗长的代码 
+        注意：我们传递了当前的 displayContent/displayImages 构成的对象，
+        以确保用户点击编辑时，看到的是卡片当前展示的最新状态（而不是最初的 props.post）
+      */}
+      <EditPostModal 
+        isOpen={showEditModal}
+        onClose={() => setShowEditModal(false)}
+        post={{
+          ...post,
+          content: displayContent,
+          images: displayImages,
+          visibility: currentVisibility
+        }}
+        onPostUpdated={handlePostUpdated}
+      />
 
-            <div className="p-4 bg-gray-50 flex justify-end gap-3 border-t border-gray-100">
-              <button
-                onClick={() => setShowEditModal(false)}
-                className="px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleUpdatePost}
-                disabled={isEditing || !editContent.trim()}
-                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2"
-              >
-                {isEditing ? 'Saving...' : 'Save Changes'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Visibility Modal */}
+      {/* Visibility Modal (保留独立的可见性修改，也可以合并到 EditPostModal 中，看你需求，目前先保留) */}
       {showVisibilityModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 animate-in fade-in duration-200">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden scale-100 animate-in zoom-in-95 duration-200">
@@ -480,7 +431,7 @@ export default function PostCard({ post, currentUserId, onDelete }: PostCardProp
         </div>
       )}
 
-      {/* Delete Post Modal */}
+      {/* Delete Post Modal (unchanged) */}
       {showDeleteModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 animate-in fade-in duration-200">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden scale-100 animate-in zoom-in-95 duration-200">
@@ -497,7 +448,7 @@ export default function PostCard({ post, currentUserId, onDelete }: PostCardProp
         </div>
       )}
 
-      {/* Delete Comment Modal */}
+      {/* Delete Comment Modal (unchanged) */}
       {commentToDelete !== null && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 animate-in fade-in duration-200">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden scale-100 animate-in zoom-in-95 duration-200">

@@ -3,17 +3,18 @@
 import { useEffect, useState, useRef, useCallback, ChangeEvent } from 'react';
 import api from '@/lib/api';
 import { convertToJpegIfNeeded } from '@/lib/imageUtils';
-import { ApiResponse, User, Post } from '@/types';
+import { ApiResponse, User, Post, LikedPostsResponse } from '@/types';
 import { useRouter } from 'next/navigation';
 import { toast } from 'react-hot-toast';
-import { Layout, Users, Heart, UserPlus, UserMinus, UserCheck, Loader2, Camera } from 'lucide-react';
+import { Layout, Users, Heart, UserPlus, UserMinus, UserCheck, Loader2, Camera, ThumbsUp } from 'lucide-react';
 import PostCard from './PostCard'; 
 import CreatePostWidget from './CreatePostWidget'; 
 import Navbar from '@/components/Navbar';
 
 interface UserProfileClientProps {
   viewedUserId: string; 
-  activeTab: 'profile' | 'following' | 'followers' | 'friends';
+  // 更新 activeTab 类型定义
+  activeTab: 'profile' | 'following' | 'followers' | 'friends' | 'liked';
 }
 
 const PAGE_SIZE = 10;
@@ -30,11 +31,18 @@ export default function UserProfileClient({ viewedUserId, activeTab }: UserProfi
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
   const avatarInputRef = useRef<HTMLInputElement>(null);
 
-  // --- Posts Pagination State ---
+  // --- Posts Pagination State (My Posts) ---
   const [posts, setPosts] = useState<Post[]>([]);
   const [postsLoading, setPostsLoading] = useState(false);
   const [postsLoadingMore, setPostsLoadingMore] = useState(false);
   const [postsHasMore, setPostsHasMore] = useState(true);
+
+  // --- Liked Posts Pagination State (NEW) ---
+  const [likedPosts, setLikedPosts] = useState<Post[]>([]);
+  const [likedLoading, setLikedLoading] = useState(false);
+  const [likedLoadingMore, setLikedLoadingMore] = useState(false);
+  const [likedHasMore, setLikedHasMore] = useState(true);
+  const [likedCursor, setLikedCursor] = useState<number | null>(null);
 
   // --- User List Pagination State ---
   const [userList, setUserList] = useState<User[]>([]);
@@ -78,7 +86,7 @@ export default function UserProfileClient({ viewedUserId, activeTab }: UserProfi
     initBaseData();
   }, [viewedUserId]);
 
-  // 2. 获取帖子逻辑
+  // 2. 获取个人帖子逻辑
   const fetchPosts = useCallback(async (isInit: boolean, lastId?: number) => {
     if (isInit) setPostsLoading(true);
     else setPostsLoadingMore(true);
@@ -105,7 +113,40 @@ export default function UserProfileClient({ viewedUserId, activeTab }: UserProfi
     }
   }, [viewedUserId]);
 
-  // 3. 获取用户列表逻辑
+  // 3. 获取 Liked 帖子逻辑 (NEW)
+  const fetchLikedPosts = useCallback(async (isInit: boolean, cursor?: number) => {
+    if (isInit) setLikedLoading(true);
+    else setLikedLoadingMore(true);
+
+    try {
+      const params = new URLSearchParams();
+      params.append('size', PAGE_SIZE.toString());
+      // 如果有 cursor 则传参
+      if (cursor !== undefined && cursor !== null) {
+        params.append('cursor', cursor.toString());
+      }
+
+      const res = await api.get<ApiResponse<LikedPostsResponse>>(`/user/${viewedUserId}/liked?${params.toString()}`);
+
+      if (res.data.code === 0) {
+        const { posts: newPosts, nextCursor } = res.data.data;
+        
+        // 如果返回数量小于 PAGE_SIZE，说明没有更多了
+        setLikedHasMore(newPosts.length >= PAGE_SIZE);
+        setLikedCursor(nextCursor);
+
+        if (isInit) setLikedPosts(newPosts);
+        else setLikedPosts(prev => [...prev, ...newPosts]);
+      }
+    } catch (e) {
+      toast.error("Failed to load liked posts");
+    } finally {
+      if (isInit) setLikedLoading(false);
+      else setLikedLoadingMore(false);
+    }
+  }, [viewedUserId]);
+
+  // 4. 获取用户列表逻辑
   const fetchUserList = useCallback(async (isInit: boolean, lastId?: number) => {
     let urlBase = '';
     if (activeTab === 'following') urlBase = `/user/${viewedUserId}/following`;
@@ -145,7 +186,8 @@ export default function UserProfileClient({ viewedUserId, activeTab }: UserProfi
     }
   }, [activeTab, viewedUserId]);
 
-  // 4. Tab 切换触发逻辑
+  // 5. Tab 切换触发逻辑
+  // Profile Tab
   useEffect(() => {
     if (activeTab !== "profile") return;
     if (me === null) return;
@@ -154,38 +196,58 @@ export default function UserProfileClient({ viewedUserId, activeTab }: UserProfi
     fetchPosts(true);
   }, [activeTab, me, fetchPosts]);
 
+  // Liked Tab (NEW)
   useEffect(() => {
-    if (activeTab === 'profile') return;
+    if (activeTab !== "liked") return;
+    setLikedPosts([]);
+    setLikedHasMore(true);
+    setLikedCursor(null); // 重置 cursor
+    fetchLikedPosts(true);
+  }, [activeTab, fetchLikedPosts]);
+
+  // User List Tabs
+  useEffect(() => {
+    if (activeTab === 'profile' || activeTab === 'liked') return;
     setUserList([]); 
     setListHasMore(true);
     fetchUserList(true);
   }, [activeTab, fetchUserList]);
 
-  // 5. 加载更多逻辑
+  // 6. 加载更多逻辑
   const handleLoadMore = () => {
     if (activeTab === 'profile') {
       if (postsLoadingMore || !postsHasMore || posts.length === 0) return;
       fetchPosts(false, posts[posts.length - 1].id);
+    } else if (activeTab === 'liked') {
+      // 只有当有 cursor 且有更多数据时才加载
+      if (likedLoadingMore || !likedHasMore || likedPosts.length === 0 || likedCursor === null) return;
+      fetchLikedPosts(false, likedCursor);
     } else {
       if (listLoadingMore || !listHasMore || userList.length === 0) return;
       fetchUserList(false, Number(userList[userList.length - 1].id)); 
     }
   };
 
-  // 6. 滚动监听
+  // 7. 滚动监听
   useEffect(() => {
     const observer = new IntersectionObserver(
       entries => {
         if (entries[0].isIntersecting) {
             if (activeTab === 'profile' && postsHasMore && !postsLoading && !postsLoadingMore) handleLoadMore();
-            else if (activeTab !== 'profile' && listHasMore && !listLoading && !listLoadingMore) handleLoadMore();
+            else if (activeTab === 'liked' && likedHasMore && !likedLoading && !likedLoadingMore) handleLoadMore();
+            else if (['following', 'followers', 'friends'].includes(activeTab) && listHasMore && !listLoading && !listLoadingMore) handleLoadMore();
         }
       },
       { threshold: 0.1 }
     );
     if (observerTarget.current) observer.observe(observerTarget.current);
     return () => { if (observerTarget.current) observer.unobserve(observerTarget.current); };
-  }, [activeTab, postsHasMore, postsLoading, postsLoadingMore, listHasMore, listLoading, listLoadingMore, posts.length, userList.length]);
+  }, [
+    activeTab, 
+    postsHasMore, postsLoading, postsLoadingMore, 
+    likedHasMore, likedLoading, likedLoadingMore, // 监听 liked 状态
+    listHasMore, listLoading, listLoadingMore
+  ]);
 
   // --- Avatar Upload Logic ---
   const handleAvatarClick = () => {
@@ -206,7 +268,6 @@ export default function UserProfileClient({ viewedUserId, activeTab }: UserProfi
     setIsUploadingAvatar(true);
 
     try {
-        // --- Conversion Logic Step ---
         const file = await convertToJpegIfNeeded(originalFile);
 
         if (file.size > 10 * 1024 * 1024) { 
@@ -215,7 +276,6 @@ export default function UserProfileClient({ viewedUserId, activeTab }: UserProfi
           return;
         }
 
-        // 1. 上传图片获取 URL
         const formData = new FormData();
         formData.append('file', file);
 
@@ -229,7 +289,6 @@ export default function UserProfileClient({ viewedUserId, activeTab }: UserProfi
 
         const newAvatarUrl = uploadRes.data.data[0];
 
-        // 2. 提交更新请求
         const updatePayload = {
             avatarUrl: newAvatarUrl
         };
@@ -280,14 +339,12 @@ export default function UserProfileClient({ viewedUserId, activeTab }: UserProfi
       const res = isFollowing ? await api.delete(url) : await api.post(url);
       if (res.data.code === 0) {
         toast.success(isFollowing ? 'Unfollowed' : 'Followed');
-        // 乐观更新 UI
         setViewedUser(prev => {
           if (!prev) return null;
           return {
             ...prev,
             following: !isFollowing,
             followerCount: prev.followerCount + (isFollowing ? -1 : 1),
-            // 注意：好友逻辑通常较复杂，此处仅做简单跟随数更新
           };
         });
       } else {
@@ -311,6 +368,8 @@ export default function UserProfileClient({ viewedUserId, activeTab }: UserProfi
 
   const handlePostDeleted = (postId: number) => {
     setPosts(posts.filter(p => p.id !== postId));
+    // 从 Liked 列表移除（如果当前正在查看）
+    setLikedPosts(likedPosts.filter(p => p.id !== postId));
     setViewedUser(prev => prev ? ({ ...prev, postCount: Math.max(0, prev.postCount - 1) }) : null);
   };
   
@@ -338,6 +397,40 @@ export default function UserProfileClient({ viewedUserId, activeTab }: UserProfi
         <div ref={observerTarget} className="py-4 flex justify-center h-16">
            {listLoadingMore && <Loader2 className="animate-spin text-gray-400" size={20}/>}
            {!listHasMore && userList.length > 0 && <span className="text-xs text-gray-300">End of list</span>}
+        </div>
+      </div>
+    );
+  };
+
+  // NEW: 渲染 Liked Posts 内容
+  const renderLikedPosts = () => {
+    return (
+      <div className="bg-white rounded-xl shadow overflow-hidden min-h-[400px] animate-in fade-in duration-300">
+        <div className="px-6 py-4 border-b border-gray-100">
+          <h3 className="text-lg font-bold text-gray-900">Liked Posts</h3>
+        </div>
+        
+        <div className="space-y-4 p-4 bg-gray-50">
+          {likedLoading ? (
+             <div className="p-10 text-center flex justify-center"><Loader2 className="animate-spin text-gray-500" /></div>
+          ) : likedPosts.length === 0 ? (
+            <div className="p-10 text-center text-gray-500">No liked posts yet.</div>
+          ) : (
+            <>
+              {likedPosts.map(post => (
+                <PostCard 
+                  key={post.id} 
+                  post={post} 
+                  currentUserId={me?.id ? String(me.id) : null} 
+                  onDelete={handlePostDeleted} 
+                />
+              ))}
+              <div ref={observerTarget} className="py-4 flex justify-center h-16">
+                 {likedLoadingMore && <Loader2 className="animate-spin text-gray-400" size={20}/>}
+                 {!likedHasMore && <span className="text-xs text-gray-300">No more posts</span>}
+              </div>
+            </>
+          )}
         </div>
       </div>
     );
@@ -469,11 +562,14 @@ export default function UserProfileClient({ viewedUserId, activeTab }: UserProfi
                   <button onClick={() => handleMyNav('following')} className={getSidebarItemClass('following')}><Users size={18} className="mr-3" />My Following</button>
                   <button onClick={() => handleMyNav('followers')} className={getSidebarItemClass('followers')}><Heart size={18} className="mr-3" />My Followers</button>
                   <button onClick={() => handleMyNav('friends')} className={getSidebarItemClass('friends')}><UserCheck size={18} className="mr-3" />My Friends</button>
+                  <button onClick={() => handleMyNav('liked')} className={getSidebarItemClass('liked')}><ThumbsUp size={18} className="mr-3" />Liked Posts</button>
                 </nav>
               </div>
             </aside>
             <main className="w-full max-w-2xl">
-              {activeTab === 'profile' ? renderProfileContent() : (
+              {/* 主区域内容切换逻辑 */}
+              {activeTab === 'profile' ? renderProfileContent() : 
+               activeTab === 'liked' ? renderLikedPosts() : (
                 <div className="bg-white rounded-xl shadow overflow-hidden min-h-[400px] animate-in fade-in duration-300">
                   <div className="px-6 py-4 border-b border-gray-100">
                     <h3 className="text-lg font-bold text-gray-900">{activeTab === 'following' ? 'Following' : activeTab === 'followers' ? 'Followers' : 'Friends'}</h3>
