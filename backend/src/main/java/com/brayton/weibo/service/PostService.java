@@ -9,9 +9,11 @@ import com.brayton.weibo.entity.User;
 import com.brayton.weibo.enums.PostVisibility;
 import com.brayton.weibo.error.CommonErrorCode;
 import com.brayton.weibo.error.WeiboException;
+import com.brayton.weibo.event.LikeEvent;
 import com.brayton.weibo.repository.*;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -29,6 +31,7 @@ public class PostService {
     private final LikeRepository likeRepository;
     private final CommentRepository commentRepository;
     private final RedisService redisService;
+    private ApplicationEventPublisher publisher;
 
     /**
      * 根据 post 构建完整响应
@@ -235,44 +238,6 @@ public class PostService {
     }
 
 
-
-    @Async
-    public void updateLikedPost(Like like) {
-        redisService.addToLiked(
-                like.getUserId(),
-                like.getPostId(),
-                TimeUtil.toTs(like.getCreatedAt())
-        );
-    }
-
-    @Transactional
-    public void likePost(Long userId, Long postId) {
-
-        // 避免重复点赞
-        if (likeRepository.existsByUserIdAndPostId(userId, postId)) return;
-
-        // 保存 Like 记录
-        Like like = new Like();
-        like.setUserId(userId);
-        like.setPostId(postId);
-        Like saved = likeRepository.save(like);
-
-        // 更新 Post 的 likeCount
-        postRepository.incrementLikeCount(postId);
-
-        updateLikedPost(saved);
-    }
-
-    @Transactional
-    public void unlikePost(Long userId, Long postId) {
-
-        if (!likeRepository.existsByUserIdAndPostId(userId, postId)) return;
-
-        likeRepository.deleteByUserIdAndPostId(userId, postId);
-
-        // 更新 Post 的 likeCount
-        postRepository.decrementLikeCount(postId);
-    }
 
     @Async
     public void pushPostToFollowersFeed(Post post) {

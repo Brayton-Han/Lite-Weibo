@@ -1,10 +1,7 @@
 package com.brayton.weibo.controller;
 
 import com.brayton.weibo.config.security.CustomUserDetails;
-import com.brayton.weibo.dto.ApiResponse;
-import com.brayton.weibo.dto.CreatePostRequest;
-import com.brayton.weibo.dto.PostResponse;
-import com.brayton.weibo.dto.PostUpdateRequest;
+import com.brayton.weibo.dto.*;
 import com.brayton.weibo.enums.PostVisibility;
 import com.brayton.weibo.service.FileService;
 import com.brayton.weibo.service.PostService;
@@ -86,5 +83,15 @@ public class PostController {
     ) {
         PostResponse newPost = postService.createPost(user.getId(), request);
         return ResponseEntity.ok(ApiResponse.success(newPost));
+    }
+
+    @GetMapping("/user/{uid}/liked")
+    public ResponseEntity<ApiResponse<?>> getLikedPosts(
+            @PathVariable long uid,
+            @RequestParam(required = false) Long cursor,
+            @RequestParam(defaultValue = "10") int size
+    ) {
+        LikedPostsResponse posts = postService.getLikedPosts(uid, cursor, size);
+        return ResponseEntity.ok(ApiResponse.success(posts));
     }
 }

@@ -8,12 +8,14 @@ import com.brayton.weibo.entity.Post;
 import com.brayton.weibo.entity.User;
 import com.brayton.weibo.error.CommonErrorCode;
 import com.brayton.weibo.error.WeiboException;
+import com.brayton.weibo.event.CommentEvent;
 import com.brayton.weibo.repository.CommentRepository;
 import com.brayton.weibo.repository.FollowRepository;
 import com.brayton.weibo.repository.PostRepository;
 import com.brayton.weibo.repository.UserRepository;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -27,6 +29,7 @@ public class CommentService {
     private final FollowRepository followRepository;
     private final PostRepository postRepository;
     private final UserRepository userRepository;
+    private final ApplicationEventPublisher publisher;
 
     private CommentResponse buildCommentResponse(Comment comment, Long currentUserId) {
 
@@ -67,6 +70,10 @@ public class CommentService {
 
         commentRepository.save(comment);
         postRepository.incrementCommentCount(postId);
+
+        if (!userId.equals(post.getUser().getId())) {
+            publisher.publishEvent(new CommentEvent(userId, post.getUser().getId(), postId, content));
+        }
     }
 
     @Transactional

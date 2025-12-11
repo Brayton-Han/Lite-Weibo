@@ -8,11 +8,13 @@ import com.brayton.weibo.entity.User;
 import com.brayton.weibo.error.CommonErrorCode;
 import com.brayton.weibo.error.ErrorCode;
 import com.brayton.weibo.error.WeiboException;
+import com.brayton.weibo.event.FollowEvent;
 import com.brayton.weibo.repository.FollowRepository;
 import com.brayton.weibo.repository.PostRepository;
 import com.brayton.weibo.repository.UserRepository;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.scheduling.annotation.Async;
@@ -31,6 +33,7 @@ public class FollowService {
     private final PostRepository postRepository;
     private final UserService userService;
     private final RedisService redisService;
+    private final ApplicationEventPublisher publisher;
 
     @Async
     public void newFollowPostWarmUp(long followerId, long followingId) {
@@ -60,6 +63,8 @@ public class FollowService {
         followRepository.save(new FollowRelation(followerId, followingId));
         userRepository.incrementFollowerCountById(followingId);
         userRepository.incrementFollowCountById(followerId);
+
+        publisher.publishEvent(new FollowEvent(followerId, followingId));
 
         // warm-up
         newFollowPostWarmUp(followerId, followingId);

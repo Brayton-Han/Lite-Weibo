@@ -2,24 +2,34 @@
 
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
-import { Search, Home, LogIn } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { Search, Home, LogIn, Bell } from 'lucide-react'; // 1. 引入 Bell
+import { useEffect, useState, useRef } from 'react';
 import api from '@/lib/api';
 import { ApiResponse, User } from '@/types';
+
+// WebSocket 相关引入
+import { Client } from '@stomp/stompjs';
+import SockJS from 'sockjs-client';
 
 export default function Navbar() {
   const router = useRouter();
   const pathname = usePathname();
   const [me, setMe] = useState<User | null>(null);
+  
+  // 2. 新增通知数量状态
+  const [notificationCount, setNotificationCount] = useState(0);
+  
+  // 用于持有 stomp client 实例，防止重复创建
+  const stompClientRef = useRef<Client | null>(null);
 
   useEffect(() => {
-    // 定义获取用户信息的函数
+    // ... 原有的获取用户信息逻辑 ...
     const fetchMe = async () => {
       const myId = localStorage.getItem('userId');
       const token = localStorage.getItem('token');
       
       if (!myId || !token) {
-        setMe(null); // 如果没有 token，清空状态
+        setMe(null);
         return;
       }
 
@@ -33,31 +43,69 @@ export default function Navbar() {
       }
     };
 
-    // 1. 组件加载时获取一次
     fetchMe();
 
-    // 2. 监听自定义事件 'user-profile-updated'
-    // 当其他组件修改了用户信息时，触发此事件，Navbar 重新拉取数据
     const handleUserUpdate = () => {
       fetchMe();
     };
     
     window.addEventListener('user-profile-updated', handleUserUpdate);
-    
-    // 同时也监听 storage 事件（处理多标签页登出/登录的情况）
     window.addEventListener('storage', handleUserUpdate);
 
-    // 3. 清理监听器
     return () => {
       window.removeEventListener('user-profile-updated', handleUserUpdate);
       window.removeEventListener('storage', handleUserUpdate);
     };
-  }, []); // 依赖项保持为空
+  }, []);
 
-  // ... (getIconClass 和 return 部分保持不变，不需要改动)
+  // 3. WebSocket 连接逻辑 (当 me 存在时触发)
+  useEffect(() => {
+    // 如果没有用户信息，或者已经连接了，就不处理
+    if (!me) return;
+
+    // 获取 Token 用于鉴权 (假设后端 WebSocket 握手需要 Token)
+    const token = localStorage.getItem('token');
+    const wsUrl = `ws://localhost:8080/ws?token=${token}`;
+    
+    // 初始化 STOMP 客户端
+    const client = new Client({
+      brokerURL: wsUrl, 
+      // connectHeaders is for the STOMP CONNECT frame, not the HTTP handshake.
+      // You can keep it if you want double verification, but the handshake needs the URL param.
+      connectHeaders: {
+        Authorization: `Bearer ${token}`, 
+      },
+      debug: (str) => console.log(str),
+      onConnect: () => {
+        console.log("WebSocket Connected!");
+
+        client.subscribe("/user/queue/follow", msg => {
+          setNotificationCount(prev => prev + 1);
+        });
+
+        client.subscribe("/user/queue/like", msg => {
+          setNotificationCount(prev => prev + 1);
+        });
+
+        client.subscribe("/user/queue/comment", msg => {
+          setNotificationCount(prev => prev + 1);
+        });
+      },
+    });
+    client.activate();
+    stompClientRef.current = client;
+
+    // 清理函数：组件卸载或用户登出时断开连接
+    return () => {
+      if (stompClientRef.current) {
+        stompClientRef.current.deactivate();
+      }
+    };
+  }, [me]); // 依赖 me，确保只有登录后才连接
+
   const getIconClass = (targetPath: string) => {
     const isActive = pathname === targetPath;
-    const baseClass = "transition-all duration-200 p-2 rounded-full";
+    const baseClass = "transition-all duration-200 p-2 rounded-full relative"; // Added relative
     if (isActive) {
       return `${baseClass} bg-blue-100 text-blue-700 shadow-sm`;
     } else {
@@ -80,6 +128,27 @@ export default function Navbar() {
           <button onClick={() => router.push('/')} className={getIconClass('/')} title="Home">
             <Home size={24} strokeWidth={pathname === '/' ? 2.5 : 2} />
           </button>
+
+          {/* 4. 新增：通知铃铛图标 */}
+          {me && (
+            <button 
+              onClick={() => {
+                 // 暂时不做跳转，或者你可以简单的清零： setNotificationCount(0);
+                 console.log("Notification clicked");
+              }} 
+              className={getIconClass('/notifications')} // 假设路径，仅用于样式匹配
+              title="Notifications"
+            >
+              <Bell size={24} strokeWidth={2} />
+              
+              {/* 小红点逻辑 */}
+              {notificationCount > 0 && (
+                <span className="absolute top-1 right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white ring-2 ring-white">
+                  {notificationCount > 99 ? '99+' : notificationCount}
+                </span>
+              )}
+            </button>
+          )}
 
           {me ? (
             <div 
