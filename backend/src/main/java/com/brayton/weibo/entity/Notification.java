@@ -5,10 +5,12 @@ import com.brayton.weibo.event.EventType;
 import com.brayton.weibo.event.FollowEvent;
 import com.brayton.weibo.event.LikeEvent;
 import jakarta.persistence.*;
+import lombok.Data;
 
 import java.time.LocalDateTime;
 
 @Entity
+@Data
 @Table(name = "notifications")
 public class Notification {
 

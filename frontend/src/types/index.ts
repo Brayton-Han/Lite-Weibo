@@ -89,3 +89,20 @@ export interface LikedPostsResponse {
   posts: Post[];
   nextCursor: number;
 }
+
+export interface NotificationCounts {
+  follow: number;
+  like: number;
+  comment: number;
+}
+
+export interface NotificationItem {
+  id: number;
+  type: 'FOLLOW' | 'LIKE' | 'COMMENT';
+  sender: User; // 发送通知的用户
+  postId?: number; // 相关联的帖子ID (如果是点赞或评论)
+  postPreview?: string; // 帖子内容预览或图片URL
+  commentContent?: string; // 评论内容
+  createdAt: string;
+  read: boolean;
+}

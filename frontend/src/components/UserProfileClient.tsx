@@ -334,17 +334,22 @@ export default function UserProfileClient({ viewedUserId, activeTab }: UserProfi
   const handleFollowToggle = async () => {
     if (!viewedUser) return;
     const isFollowing = viewedUser.following;
+    const isFollowed = viewedUser.followed;
     const url = `/follow/${viewedUserId}`;
     try {
       const res = isFollowing ? await api.delete(url) : await api.post(url);
       if (res.data.code === 0) {
         toast.success(isFollowing ? 'Unfollowed' : 'Followed');
+        var friendChange = 0;
+        if (isFollowing && isFollowed) friendChange = -1;
+        else if (!isFollowing && isFollowed) friendChange = 1;
         setViewedUser(prev => {
           if (!prev) return null;
           return {
             ...prev,
             following: !isFollowing,
             followerCount: prev.followerCount + (isFollowing ? -1 : 1),
+            friendCount: prev.friendCount + friendChange
           };
         });
       } else {

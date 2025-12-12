@@ -34,4 +34,12 @@ public class WebSocketPusher {
                 comment
         );
     }
+
+    public void notifyUserNewPost(Long userId) {
+        messagingTemplate.convertAndSendToUser(
+                userId.toString(),
+                "/queue/new-post",
+                "new post content or simple signal"
+        );
+    }
 }

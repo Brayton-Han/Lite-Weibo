@@ -11,6 +11,7 @@ import com.brayton.weibo.error.CommonErrorCode;
 import com.brayton.weibo.error.WeiboException;
 import com.brayton.weibo.event.LikeEvent;
 import com.brayton.weibo.repository.*;
+import com.brayton.weibo.webSocket.WebSocketPusher;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.ApplicationEventPublisher;
@@ -31,7 +32,7 @@ public class PostService {
     private final LikeRepository likeRepository;
     private final CommentRepository commentRepository;
     private final RedisService redisService;
-    private ApplicationEventPublisher publisher;
+    private final WebSocketPusher wsPusher;
 
     /**
      * 根据 post 构建完整响应
@@ -264,6 +265,7 @@ public class PostService {
 
         for (Long pushId : pushIds) {
             redisService.addToFeed(pushId, post.getId(), ts);
+            wsPusher.notifyUserNewPost(pushId);
         }
     }
 
