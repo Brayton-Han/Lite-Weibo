@@ -51,4 +51,12 @@ public interface PostRepository extends JpaRepository<Post, Long> {
     @Modifying
     @Query("UPDATE Post p SET p.commentCount = CASE WHEN p.commentCount > 0 THEN p.commentCount - 1 ELSE 0 END WHERE p.id = :postId")
     void decrementCommentCount(@Param("postId") Long postId);
+
+    @Modifying
+    @Query("UPDATE Post p SET p.repostCount = p.repostCount + 1 WHERE p.id = :postId")
+    void incrementRepostCount(@Param("postId") Long postId);
+
+    @Modifying
+    @Query("UPDATE Post p SET p.repostCount = CASE WHEN p.repostCount > 0 THEN p.repostCount - 1 ELSE 0 END WHERE p.id = :postId")
+    void decrementRepostCount(@Param("postId") Long postId);
 }

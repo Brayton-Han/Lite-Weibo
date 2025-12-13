@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, ChangeEvent, DragEvent } from 'react';
-import { PostVisibility, Post, CreatePostRequest } from '@/types';
+import { PostVisibility, Post, CreatePostRequest, PostType } from '@/types';
 import api from '@/lib/api';
 import { Image as ImageIcon, Send, X, Globe, Lock, UploadCloud, Loader2 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
@@ -128,7 +128,8 @@ export default function CreatePostWidget({ onPostCreated }: CreatePostWidgetProp
       const payload: CreatePostRequest = {
         content,
         images: imageUrls, 
-        visibility
+        visibility,
+        type: PostType.ORIGINAL
       };
 
       const res = await api.post('/posts', payload);

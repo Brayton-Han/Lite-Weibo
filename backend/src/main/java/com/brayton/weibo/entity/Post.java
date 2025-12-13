@@ -2,6 +2,7 @@ package com.brayton.weibo.entity;
 
 import com.brayton.weibo.common.ImagesConverter;
 import com.brayton.weibo.enums.PostStatus;
+import com.brayton.weibo.enums.PostType;
 import com.brayton.weibo.enums.PostVisibility;
 import jakarta.persistence.*;
 import jakarta.persistence.Table;
@@ -13,8 +14,7 @@ import java.util.List;
 
 @Entity
 @Table(name = "posts")
-@Getter
-@Setter
+@Data
 @Builder
 @AllArgsConstructor
 @NoArgsConstructor
@@ -31,6 +31,10 @@ public class Post {
     @JoinColumn(name = "user_id")
     private User user;
 
+    @Column(nullable = false)
+    @Enumerated(EnumType.STRING)
+    private PostType type = PostType.ORIGINAL;
+
     // 文本内容（支持富文本的话可以改成 TEXT 类型）
     @Column(columnDefinition = "TEXT", nullable = false)
     private String content;
@@ -39,6 +43,10 @@ public class Post {
     @Convert(converter = ImagesConverter.class)
     @Column(columnDefinition = "TEXT")
     private List<String> images;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "ref_post_id")
+    private Post refPost;
 
     // 可见性：public / followers / private / friends
     @Column(nullable = false)
@@ -51,6 +59,10 @@ public class Post {
     // 评论数
     @Column(nullable = false)
     private Long commentCount = 0L;
+
+    // 评论数
+    @Column(nullable = false, columnDefinition = "bigint default 0")
+    private Long repostCount = 0L;
 
     // 审核状态 normal / reviewing / blocked
     @Column(nullable = false)

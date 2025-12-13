@@ -6,6 +6,7 @@ import com.brayton.weibo.dto.*;
 import com.brayton.weibo.entity.Like;
 import com.brayton.weibo.entity.Post;
 import com.brayton.weibo.entity.User;
+import com.brayton.weibo.enums.PostType;
 import com.brayton.weibo.enums.PostVisibility;
 import com.brayton.weibo.error.CommonErrorCode;
 import com.brayton.weibo.error.WeiboException;
@@ -46,12 +47,15 @@ public class PostService {
                 .id(post.getId())
                 // Don't care friendCount and postCount
                 .user(new UserResponse(author, following, followed, 0, 0))
+                .type(post.getType())
                 .content(post.getContent())
                 .images(post.getImages())
+                .refPost(post.getRefPost() == null ? null : buildPostResponse(post.getRefPost(), currentUserId, false, false)) // don't care
                 .visibility(post.getVisibility())
                 .liked(isLiked)
                 .likeCount(post.getLikeCount())
                 .commentCount(post.getCommentCount())
+                .repostCount(post.getRepostCount())
                 .createdAt(post.getCreatedAt())
                 .updatedAt(post.getUpdatedAt())
                 .isEdited(post.isEdited())
@@ -265,6 +269,7 @@ public class PostService {
 
         for (Long pushId : pushIds) {
             redisService.addToFeed(pushId, post.getId(), ts);
+            if (pushId.equals(authorId)) continue;
             wsPusher.notifyUserNewPost(pushId);
         }
     }
@@ -273,21 +278,31 @@ public class PostService {
     public PostResponse createPost(Long userId, CreatePostRequest req) {
 
         // 业务校验：内容和图片不能同时为空
-        if ((req.getContent() == null || req.getContent().isBlank())
+        if (req.getType() == PostType.ORIGINAL &&
+                (req.getContent() == null || req.getContent().isBlank())
                 && (req.getImages() == null || req.getImages().isEmpty())) {
             throw new WeiboException(CommonErrorCode.POST_CONTENT_NULL);
         }
+
         User author = userRepository.findById(userId)
                 .orElseThrow(() -> new WeiboException(CommonErrorCode.USER_NOT_FOUND));
+        Post refPost = (req.getRefPostId() == null) ? null :
+                postRepository.findById(req.getRefPostId()).orElseThrow(() -> new WeiboException(CommonErrorCode.POST_NOT_FOUND));
 
         Post post = new Post();
         post.setUser(author);
+        post.setType(req.getType());
         post.setContent(req.getContent());
         post.setImages(req.getImages());
+        post.setRefPost(refPost);
         post.setVisibility(req.getVisibility());
         post.setEdited(false);
 
         Post saved = postRepository.save(post);
+
+        if (refPost != null) {
+            postRepository.incrementRepostCount(refPost.getId());
+        }
 
         // fan-out
         pushPostToFollowersFeed(saved);
@@ -311,6 +326,11 @@ public class PostService {
 
         // 2. 删评论（如果有 commentRepository）
         commentRepository.deleteAllByPostId(postId);
+
+        // 3. 删转发
+        if (post.getRefPost() != null) {
+            postRepository.decrementRepostCount(post.getRefPost().getId());
+        }
 
         // 3. 删帖子
         postRepository.deleteById(postId);

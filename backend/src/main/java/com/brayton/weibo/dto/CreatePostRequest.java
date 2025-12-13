@@ -1,5 +1,6 @@
 package com.brayton.weibo.dto;
 
+import com.brayton.weibo.enums.PostType;
 import com.brayton.weibo.enums.PostVisibility;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -23,4 +24,9 @@ public class CreatePostRequest {
     // 可见性
     @NotNull(message = "可见性不能为空")
     private PostVisibility visibility = PostVisibility.PUBLIC;
+
+    @NotNull(message = "post type can't be null")
+    private PostType type = PostType.ORIGINAL;
+
+    private Long refPostId;
 }

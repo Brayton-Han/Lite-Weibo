@@ -45,6 +45,12 @@ export interface RegisterRequest {
   password: string;
 }
 
+export enum PostType {
+  ORIGINAL = 'ORIGINAL',
+  REPOST = 'REPOST',
+  QUOTE = 'QUOTE'
+}
+
 export enum PostVisibility {
   PUBLIC = 'PUBLIC',
   PRIVATE = 'PRIVATE',
@@ -55,12 +61,15 @@ export enum PostVisibility {
 export interface Post {
   id: number;
   user: User;
+  type: PostType;
   content: string;
   images: string[];
+  refPost: Post | null;
   visibility: PostVisibility;
   liked: boolean;
   likeCount: number;
   commentCount: number;
+  repostCount: number;
   createdAt: string; // Java LocalDateTime 序列化后通常是 ISO 字符串
   updatedAt: string;
   edited: boolean;
@@ -70,6 +79,8 @@ export interface CreatePostRequest {
   content: string;
   images: string[];
   visibility: PostVisibility;
+  type?: PostType; 
+  refPostId?: number;
 }
 
 export interface UpdatePostRequest {

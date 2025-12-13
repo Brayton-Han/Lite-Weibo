@@ -1,17 +1,17 @@
 'use client';
 
-import { Post, Comment, PostVisibility } from '@/types';
+import { Post, Comment, PostVisibility, PostType } from '@/types';
 import { 
-  Heart, MessageCircle, Share2, Trash2, AlertCircle, Send, 
+  Heart, MessageCircle, Trash2, AlertCircle, Send, 
   MoreHorizontal, Globe, Lock, Users, UserCheck, Eye, X, Edit,
-  ImagePlus, Loader2 
+  Repeat 
 } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import { toast } from 'react-hot-toast';
 import api from '@/lib/api';
 import Link from 'next/link';
-// 引入你提供的 EditPostModal 组件
 import EditPostModal from './EditPostModel'; 
+import RepostModal from './RepostModal';
 
 interface PostCardProps {
   post: Post;
@@ -30,11 +30,15 @@ export default function PostCard({ post, currentUserId, onDelete }: PostCardProp
   const [likeCount, setLikeCount] = useState(post.likeCount);
   const [isLikeLoading, setIsLikeLoading] = useState(false);
 
+  // --- State: Repost ---
+  const [repostCount, setRepostCount] = useState(post.repostCount);
+  const [showRepostModal, setShowRepostModal] = useState(false);
+
   // --- State: Delete Post Modal ---
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  // --- State: Edit Post Modal (仅控制显示/隐藏) ---
+  // --- State: Edit Post Modal ---
   const [showEditModal, setShowEditModal] = useState(false);
 
   // --- State: Comments ---
@@ -94,19 +98,30 @@ export default function PostCard({ post, currentUserId, onDelete }: PostCardProp
     }
   };
 
-  // --- Handlers: Edit Post Logic (Simplified) ---
+  // --- Handlers: Repost Logic ---
+  const handleRepostClick = () => {
+    if (!currentUserId) {
+      toast.error("Please login to repost");
+      return;
+    }
+    setShowRepostModal(true);
+  };
+
+  const handleRepostSuccess = (newPost: Post) => {
+    setRepostCount((prev) => prev + 1);
+  };
+
+  // --- Handlers: Edit Post Logic ---
   const openEditModal = () => {
     setShowEditModal(true);
     setShowMenu(false);
   };
 
-  // 当 EditPostModal 完成更新后调用的回调函数
   const handlePostUpdated = (updatedPost: Post) => {
     setDisplayContent(updatedPost.content);
     setDisplayImages(updatedPost.images || []);
-    setCurrentVisibility(updatedPost.visibility); // 同步更新可见性
+    setCurrentVisibility(updatedPost.visibility);
     setIsEdited(true);
-    // 这里不需要手动 toast，因为 EditPostModal 内部已经 toast 成功了
   };
 
   // --- Handlers: Visibility Logic ---
@@ -204,13 +219,13 @@ export default function PostCard({ post, currentUserId, onDelete }: PostCardProp
   };
 
   // --- Render Helpers ---
-  const renderImages = () => {
-    if (!displayImages || displayImages.length === 0) return null;
-    const count = displayImages.length;
+  const renderImages = (images: string[]) => {
+    if (!images || images.length === 0) return null;
+    const count = images.length;
     if (count === 1) {
       return (
         <div className="mt-3 rounded-lg overflow-hidden bg-gray-100 border border-gray-100">
-          <img src={displayImages[0]} alt="post-img" className="w-full h-auto max-h-[600px] object-contain block hover:opacity-95 transition-opacity cursor-pointer" />
+          <img src={images[0]} alt="post-img" className="w-full h-auto max-h-[600px] object-contain block hover:opacity-95 transition-opacity cursor-pointer" />
         </div>
       );
     }
@@ -219,7 +234,7 @@ export default function PostCard({ post, currentUserId, onDelete }: PostCardProp
     else if (count >= 3) gridClass += ' grid-cols-3';
     return (
       <div className={gridClass}>
-        {displayImages.map((img, idx) => (
+        {images.map((img, idx) => (
           <div key={idx} className={`relative ${count === 1 ? 'aspect-video' : 'aspect-square'}`}>
              <img src={img} alt="post-img" className="w-full h-full object-cover bg-gray-100 hover:opacity-95 transition-opacity cursor-pointer" />
           </div>
@@ -246,6 +261,45 @@ export default function PostCard({ post, currentUserId, onDelete }: PostCardProp
       case PostVisibility.PRIVATE: return "Private";
       default: return v;
     }
+  };
+
+  // --- NEW: Render Referenced Post (原贴渲染逻辑) ---
+  const renderRefPost = () => {
+    // 只有当存在 refPost 时才渲染
+    if (!post.refPost) return null;
+
+    const ref = post.refPost;
+
+    return (
+      <div className="mt-3 border border-gray-200 rounded-xl bg-gray-50 p-3 hover:bg-gray-100 transition-colors">
+         {/* 原贴作者信息 */}
+         <Link href={`/user/${ref.user.id}`} className="flex items-center gap-2 mb-2 group">
+           <img 
+              src={ref.user.avatarUrl || "/default-avatar.png"} 
+              className="w-5 h-5 rounded-full object-cover" 
+              alt="ref-avatar" 
+           />
+           <span className="font-semibold text-sm text-gray-900 group-hover:underline">
+             {ref.user.username}
+           </span>
+           <span className="text-xs text-gray-500">
+             @{ref.user.username} · {new Date(ref.createdAt).toLocaleDateString()}
+           </span>
+         </Link>
+         
+         {/* 原贴内容 */}
+         <div className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed pl-7">
+           {ref.content}
+         </div>
+
+         {/* 原贴图片 (复用 renderImages，但稍微调整容器样式) */}
+         {ref.images && ref.images.length > 0 && (
+           <div className="pl-7 scale-95 origin-top-left w-[105%]"> 
+             {renderImages(ref.images)}
+           </div>
+         )}
+      </div>
+    );
   };
 
   return (
@@ -325,24 +379,42 @@ export default function PostCard({ post, currentUserId, onDelete }: PostCardProp
 
         {/* --- Content --- */}
         <div className="mt-3">
-          <p className="text-gray-800 whitespace-pre-wrap leading-relaxed">{displayContent}</p>
-          {renderImages()}
+          {/* 当前帖子的内容 */}
+          {displayContent && (
+             <p className="text-gray-800 whitespace-pre-wrap leading-relaxed">{displayContent}</p>
+          )}
+          
+          {/* 当前帖子的图片 */}
+          {renderImages(displayImages)}
+
+          {/* NEW: 渲染被转发/引用的原贴 */}
+          {renderRefPost()}
         </div>
 
         {/* --- Footer Actions --- */}
         <div className="flex items-center justify-between mt-4 pt-3 border-t border-gray-100 text-gray-500">
+          {/* Like Button */}
           <button onClick={handleLike} disabled={isLikeLoading} className={`flex items-center space-x-2 text-sm transition-colors group ${liked ? 'text-red-500' : 'hover:text-red-500'}`}>
             <Heart size={20} className={`transition-transform group-active:scale-125 ${liked ? 'fill-current' : ''}`} />
             <span>{likeCount > 0 ? likeCount : 'Like'}</span>
           </button>
+          
+          {/* Comment Button */}
           <button onClick={toggleCommentSection} className={`flex items-center space-x-2 text-sm transition-colors ${showCommentBox ? 'text-blue-600' : 'hover:text-blue-600'}`}>
             <MessageCircle size={20} className={showCommentBox ? 'fill-blue-50' : ''} />
             <span>{commentCount > 0 ? commentCount : 'Comment'}</span>
           </button>
-          <button className="flex items-center space-x-2 text-sm hover:text-green-500 transition-colors">
-            <Share2 size={20} />
-            <span>Share</span>
-          </button>
+
+          {/* Repost Button (Only for ORIGINAL posts) */}
+          {post.type === PostType.ORIGINAL && (
+            <button 
+              onClick={handleRepostClick} 
+              className="flex items-center space-x-2 text-sm hover:text-green-500 transition-colors"
+            >
+              <Repeat size={20} />
+              <span>{repostCount > 0 ? repostCount : 'Repost'}</span>
+            </button>
+          )}
         </div>
 
         {/* --- Comment Section --- */}
@@ -378,11 +450,6 @@ export default function PostCard({ post, currentUserId, onDelete }: PostCardProp
       </div>
 
       {/* --- Modals --- */}
-      
-      {/* NEW: 使用 EditPostModal 组件替换了之前冗长的代码 
-        注意：我们传递了当前的 displayContent/displayImages 构成的对象，
-        以确保用户点击编辑时，看到的是卡片当前展示的最新状态（而不是最初的 props.post）
-      */}
       <EditPostModal 
         isOpen={showEditModal}
         onClose={() => setShowEditModal(false)}
@@ -394,8 +461,12 @@ export default function PostCard({ post, currentUserId, onDelete }: PostCardProp
         }}
         onPostUpdated={handlePostUpdated}
       />
-
-      {/* Visibility Modal (保留独立的可见性修改，也可以合并到 EditPostModal 中，看你需求，目前先保留) */}
+      <RepostModal
+        isOpen={showRepostModal}
+        onClose={() => setShowRepostModal(false)}
+        post={post}
+        onPostCreated={handleRepostSuccess}
+      />
       {showVisibilityModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 animate-in fade-in duration-200">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden scale-100 animate-in zoom-in-95 duration-200">
@@ -430,8 +501,6 @@ export default function PostCard({ post, currentUserId, onDelete }: PostCardProp
           </div>
         </div>
       )}
-
-      {/* Delete Post Modal (unchanged) */}
       {showDeleteModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 animate-in fade-in duration-200">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden scale-100 animate-in zoom-in-95 duration-200">
@@ -447,8 +516,6 @@ export default function PostCard({ post, currentUserId, onDelete }: PostCardProp
           </div>
         </div>
       )}
-
-      {/* Delete Comment Modal (unchanged) */}
       {commentToDelete !== null && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 animate-in fade-in duration-200">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden scale-100 animate-in zoom-in-95 duration-200">
