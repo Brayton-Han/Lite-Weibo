@@ -1,5 +1,6 @@
 package com.brayton.weibo.service;
 
+import com.brayton.weibo.common.ChineseUtil;
 import com.brayton.weibo.common.FeedRandomizer;
 import com.brayton.weibo.common.TimeUtil;
 import com.brayton.weibo.dto.*;
@@ -242,6 +243,31 @@ public class PostService {
                 .toList();
     }
 
+    public List<PostResponse> getSearchResults(String query, Long lastId, int size, Long selfId) {
+
+        lastId = lastId == null ? Long.MAX_VALUE : lastId;
+
+        List<Post> posts;
+        boolean containsChinese = ChineseUtil.containsChinese(query);
+        if (containsChinese)
+            posts = postRepository.searchChinesePosts(
+                    "%" + query + "%",
+                    lastId,
+                    List.of(PostVisibility.PUBLIC),
+                    PageRequest.of(0, size)
+            );
+        else
+            posts = postRepository.searchPosts(
+                    query,
+                    lastId,
+                    List.of(PostVisibility.PUBLIC),
+                    PageRequest.of(0, size)
+            );
+
+        return posts.stream()
+                .map(post -> buildPostResponse(post, selfId, false, false))
+                .toList();
+    }
 
 
     @Async

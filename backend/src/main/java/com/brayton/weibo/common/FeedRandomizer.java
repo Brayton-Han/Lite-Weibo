@@ -2,7 +2,6 @@ package com.brayton.weibo.common;
 
 import java.util.*;
 
-
 /* 从一堆 Post 里按作者尽量均匀地选出 N 条 */
 public class FeedRandomizer {
 

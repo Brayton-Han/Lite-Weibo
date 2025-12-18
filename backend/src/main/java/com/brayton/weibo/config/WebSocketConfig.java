@@ -1,6 +1,6 @@
 package com.brayton.weibo.config;
 
-import com.brayton.weibo.config.security.JWTService;
+import com.brayton.weibo.service.JWTService;
 import com.brayton.weibo.config.security.JwtHandshakeInterceptor;
 import com.brayton.weibo.config.security.JwtPrincipalHandshakeHandler;
 import lombok.RequiredArgsConstructor;

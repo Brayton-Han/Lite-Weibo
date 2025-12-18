@@ -11,6 +11,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
+
 @RestController
 @AllArgsConstructor
 public class UserController {
@@ -33,6 +35,12 @@ public class UserController {
     public ResponseEntity<ApiResponse<?>> getUserById(@AuthenticationPrincipal CustomUserDetails self, @PathVariable long id) {
         UserResponse userResponse = userService.getUserInfoById(id, self.getId());
         return ResponseEntity.ok(ApiResponse.success(userResponse));
+    }
+
+    @GetMapping("/users")
+    public ResponseEntity<ApiResponse<?>> getAllUsers() {
+        List<UserResponse> users = userService.getAllUsers();
+        return ResponseEntity.ok(ApiResponse.success(users));
     }
 
     @PutMapping("/set")

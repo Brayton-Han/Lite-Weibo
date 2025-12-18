@@ -30,6 +30,32 @@ public interface PostRepository extends JpaRepository<Post, Long> {
             Pageable pageable
     );
 
+    @Query(value = """
+    SELECT *
+    FROM posts
+    WHERE id < :lastId and visibility in :visibilities and search_vector @@ plainto_tsquery('simple', :query)
+    ORDER BY created_at DESC
+    """, nativeQuery = true)
+    List<Post> searchPosts(
+            @Param("query") String query,
+            @Param("lastId") Long lastId,
+            @Param("visibilities") List<PostVisibility> visibilities,
+            Pageable pageable
+    );
+
+    @Query("""
+    SELECT p
+    FROM Post p
+    WHERE p.id < :lastId and p.visibility in :visibilities and p.content LIKE :query
+    ORDER BY p.createdAt DESC
+    """)
+    List<Post> searchChinesePosts(
+            @Param("query") String query,
+            @Param("lastId") Long lastId,
+            @Param("visibilities") List<PostVisibility> visibilities,
+            Pageable pageable
+    );
+
     List<Post> findByIdIn(List<Long> postIds);
 
     List<Post> findByIdIn(Set<Object> postIds);

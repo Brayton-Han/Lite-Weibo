@@ -1,5 +1,6 @@
 package com.brayton.weibo.config.security;
 
+import com.brayton.weibo.service.JWTService;
 import com.brayton.weibo.service.UserService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;

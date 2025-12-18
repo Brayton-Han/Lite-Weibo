@@ -94,4 +94,15 @@ public class PostController {
         LikedPostsResponse posts = postService.getLikedPosts(uid, cursor, size);
         return ResponseEntity.ok(ApiResponse.success(posts));
     }
+
+    @GetMapping("/posts/search")
+    public ResponseEntity<ApiResponse<?>> getSearchPosts(
+            @RequestParam() String q,
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(required = false) Long lastId,
+            @AuthenticationPrincipal CustomUserDetails self
+    ) {
+        List<PostResponse> posts = postService.getSearchResults(q, lastId, size, self.getId());
+        return ResponseEntity.ok(ApiResponse.success(posts));
+    }
 }

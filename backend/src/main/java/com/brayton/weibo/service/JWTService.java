@@ -1,4 +1,4 @@
-package com.brayton.weibo.config.security;
+package com.brayton.weibo.service;
 
 import com.auth0.jwt.JWT;
 import com.auth0.jwt.algorithms.Algorithm;
@@ -14,7 +14,7 @@ public class JWTService {
     @Value("${jwt.secret:A_STRONG_AND_SECURE_SECRET_KEY_FOR_SIGNATURE}")
     private String secret;
 
-    private static final long EXPIRATION_TIME = 86400000; // 24小时 (毫秒)
+    private static final long EXPIRATION_TIME = 3600000; // 1小时 (毫秒)
     private static final String USER_ID_CLAIM = "userId";
     private static final String ISSUER = "LiteWeibo";
 
@@ -24,7 +24,7 @@ public class JWTService {
         return JWT.create()
                 .withClaim(USER_ID_CLAIM, userId) // 载荷中的用户ID
                 .withIssuer(ISSUER) // 签发者
-                .withIssuedAt(new Date()) // 签发时间
+                .withIssuedAt(new Date(System.currentTimeMillis())) // 签发时间
                 .withExpiresAt(new Date(System.currentTimeMillis() + EXPIRATION_TIME)) // 过期时间
                 .sign(algorithm);
     }

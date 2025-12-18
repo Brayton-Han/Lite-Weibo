@@ -7,11 +7,19 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.List;
 import java.util.Optional;
 
 public interface UserRepository extends JpaRepository<User, Long> {
     Optional<User> findByUsername(String username);
     boolean existsByUsernameOrEmail(String username, String email);
+
+    @Query("""
+        select u
+        from User u
+        order by u.followerCount desc
+    """)
+    List<User> getAllUsers();
 
     @Modifying
     @Transactional
