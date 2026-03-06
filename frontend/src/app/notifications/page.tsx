@@ -1,6 +1,10 @@
-// app/notifications/page.tsx
+import { Suspense } from 'react';
 import NotificationsClient from '@/components/NotificationsClient';
 
 export default function NotificationsPage() {
-  return <NotificationsClient />;
+    return (
+        <Suspense fallback={<div>Loading...</div>}>
+            <NotificationsClient />
+        </Suspense>
+    );
 }
