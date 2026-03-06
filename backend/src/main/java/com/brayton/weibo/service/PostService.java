@@ -63,6 +63,29 @@ public class PostService {
                 .build();
     }
 
+    private PostResponse buildPostResponse(Post post, Long currentUserId, boolean following, boolean followed, boolean isLiked) {
+
+        User author = post.getUser();
+
+        return PostResponse.builder()
+                .id(post.getId())
+                // Don't care friendCount and postCount
+                .user(new UserResponse(author, following, followed, 0, 0))
+                .type(post.getType())
+                .content(post.getContent())
+                .images(post.getImages())
+                .refPost(post.getRefPost() == null ? null : buildPostResponse(post.getRefPost(), currentUserId, false, false)) // don't care
+                .visibility(post.getVisibility())
+                .liked(isLiked)
+                .likeCount(post.getLikeCount())
+                .commentCount(post.getCommentCount())
+                .repostCount(post.getRepostCount())
+                .createdAt(post.getCreatedAt())
+                .updatedAt(post.getUpdatedAt())
+                .isEdited(post.isEdited())
+                .build();
+    }
+
 
 
     // !!! USE FOR NEWEST/FOLLOWING/LIKED POST TIMELINE !!!
@@ -86,20 +109,41 @@ public class PostService {
         List<PostResponse> result = new ArrayList<>();
 
         while (result.size() < size) {
-            Set<Object> postIds = redisService.getFeedAfter(userId, cursor, size);
+            int fetch = Math.min(size * 5, 100);
+            List<Long> postIds = redisService.getFeedAfter(userId, cursor, fetch);
             if (postIds.isEmpty()) break;
 
-            List<Post> posts = postRepository.findByIdInOrderByCreatedAtDesc(postIds);
-            for (Post post : posts) {
+            List<Post> posts = postRepository.findByIdInWithUser(postIds);
+            Map<Long, Post> postMap =
+                    posts.stream().collect(Collectors.toMap(Post::getId, p -> p));
+            List<Post> orderedPosts = postIds.stream()
+                    .map(postMap::get)
+                    .filter(Objects::nonNull)
+                    .toList();
+
+            Set<Long> authorIds = orderedPosts.stream()
+                    .map(p -> p.getUser().getId())
+                    .collect(Collectors.toSet());
+            Set<Long> followingIds = followRepository.findFollowingIds(userId, authorIds);
+            Set<Long> followedByIds = followRepository.findFollowedByIds(userId, authorIds);
+
+            Set<Long> postIdSet = orderedPosts.stream()
+                    .map(Post::getId)
+                    .collect(Collectors.toSet());
+
+            Set<Long> likedPostIds = likeRepository.findLikedPostIds(userId, postIdSet);
+
+            for (Post post : orderedPosts) {
                 if (result.size() >= size) break;
 
                 Long authorId = post.getUser().getId();
                 boolean sameUser = authorId.equals(userId);
-                boolean following = sameUser || followRepository.existsByFollowerIdAndFollowingId(userId, authorId);
-                boolean followed = sameUser || followRepository.existsByFollowerIdAndFollowingId(authorId, userId);
+                boolean following = sameUser || followingIds.contains(authorId);
+                boolean followed  = sameUser || followedByIds.contains(authorId);
+                boolean isLiked = likedPostIds.contains(post.getId());
 
                 if (isVisibleToUser(post, sameUser, following, followed)) {
-                    result.add(buildPostResponse(post, userId, following, followed));
+                    result.add(buildPostResponse(post, userId, following, followed, isLiked));
                 }
 
                 cursor = TimeUtil.toTs(post.getCreatedAt());

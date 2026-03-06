@@ -10,7 +10,8 @@ import java.time.LocalDateTime;
 @Table(name = "follows",
         uniqueConstraints = {
                 @UniqueConstraint(columnNames = {"follower_id", "following_id"})
-        })
+        },
+        indexes = {@Index(name = "idx_following_follower", columnList = "following_id,follower_id")})
 @Getter
 @NoArgsConstructor
 public class FollowRelation {

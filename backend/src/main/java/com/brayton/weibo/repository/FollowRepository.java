@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -103,4 +104,18 @@ public interface FollowRepository extends JpaRepository<FollowRelation, Long> {
       )
 """)
     int findFriendCountIds(Long userId);
+
+    @Query("""
+        select f.followingId from FollowRelation f
+        where f.followerId = :userId and f.followingId in :authorIds
+    """)
+    Set<Long> findFollowingIds(@Param("userId") Long userId,
+                               @Param("authorIds") Collection<Long> authorIds);
+
+    @Query("""
+        select f.followerId from FollowRelation f
+        where f.followingId = :userId and f.followerId in :authorIds
+    """)
+    Set<Long> findFollowedByIds(@Param("userId") Long userId,
+                                @Param("authorIds") Collection<Long> authorIds);
 }

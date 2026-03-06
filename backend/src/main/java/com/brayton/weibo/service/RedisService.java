@@ -22,16 +22,20 @@ public class RedisService {
         redis.opsForZSet().add(key, postId, timestamp);
     }
 
-    public Set<Object> getFeedAfter(Long userId, long lastTimestamp, int size) {
+    public List<Long> getFeedAfter(Long userId, long lastTimestamp, int size) {
         String key = "feed:" + userId;
 
-        return redis.opsForZSet().reverseRangeByScore(
+        Set<Object> raw = redis.opsForZSet().reverseRangeByScore(
                 key,
-                Double.NEGATIVE_INFINITY,   // min
-                lastTimestamp - 1,          // max
+                Double.NEGATIVE_INFINITY,
+                lastTimestamp - 1,
                 0,
                 size
         );
+
+        return raw.stream()
+                .map(id -> Long.valueOf(id.toString()))
+                .toList();
     }
 
     public void trimFeed(long userId, int maxSize) {
