@@ -1,4 +1,4 @@
-# Lite-Weibo Backend
+# System Overview
 
 A **Twitter-like social media platform** built with **Java Spring Boot 3.5.7**, running on **Java 21**. Designed to be scalable with event-driven architecture and real-time capabilities.
 
