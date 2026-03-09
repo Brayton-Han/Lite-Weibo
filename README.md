@@ -104,7 +104,7 @@ All bind to `notification.exchange` with routing keys like `notification.follow`
       │                     │
    REST APIs          WebSocket/STOMP
       │                     │
-┌─────┴──────────────────────────┐
+┌─────┴───────────────────────────┐
 │      Spring Security            │
 │    (JWT Authentication Filter)  │
 └────────────────┬────────────────┘
