@@ -377,7 +377,7 @@ public class PostService {
         // fan-out
         pushPostToFollowersFeed(saved);
 
-        return buildPostResponse(saved, userId, true, true); // 返回新帖详情
+        return buildPostResponse(saved, userId, true, true, false); // 返回新帖详情
     }
 
     @Transactional
