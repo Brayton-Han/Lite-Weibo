@@ -13,7 +13,11 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 @Entity
-@Table(name = "posts")
+@Table(name = "posts",
+        indexes = {
+                @Index(name = "idx_posts_created_id", columnList = "created_at,id"),
+                @Index(name = "idx_posts_user_created", columnList = "user_id,created_at")
+        })
 @Data
 @Builder
 @AllArgsConstructor
