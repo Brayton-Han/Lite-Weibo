@@ -6,6 +6,7 @@ import com.brayton.weibo.enums.PostType;
 import com.brayton.weibo.enums.PostVisibility;
 import jakarta.persistence.*;
 import jakarta.persistence.Table;
+import jakarta.persistence.Index;
 import lombok.*;
 import org.hibernate.annotations.*;
 
