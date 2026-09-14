@@ -73,5 +73,8 @@ public class LikeService {
 
         // 更新 Post 的 likeCount
         postRepository.decrementLikeCount(postId);
+
+        // 同步清理 liked: ZSet，否则会残留读路径无法解释的幽灵条目
+        redisService.removeFromLiked(userId, postId);
     }
 }

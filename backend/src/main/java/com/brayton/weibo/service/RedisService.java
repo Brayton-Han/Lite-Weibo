@@ -2,6 +2,7 @@ package com.brayton.weibo.service;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -49,16 +50,30 @@ public class RedisService {
         redis.opsForZSet().add(key, postId, timestamp);
     }
 
-    public Set<Object> getLikedAfter(Long userId, long lastTimestamp, int size) {
+    /**
+     * 按 score 倒序取 liked: ZSet 的一页，连同 score（点赞时间戳）一起返回。
+     * 分页游标必须由 score 推进：ZSet 中可能残留 DB 里已不存在的幽灵条目，
+     * 只有 score 能保证游标在这些条目上也继续前进，不会卡在同一窗口。
+     */
+    public List<ZSetOperations.TypedTuple<Object>> getLikedAfterWithScores(
+            Long userId, long lastTimestamp, int size) {
         String key = "liked:" + userId;
 
-        return redis.opsForZSet().reverseRangeByScore(
-                key,
-                Double.NEGATIVE_INFINITY,   // min
-                lastTimestamp - 1,          // max
-                0,
-                size
-        );
+        Set<ZSetOperations.TypedTuple<Object>> raw =
+                redis.opsForZSet().reverseRangeByScoreWithScores(
+                        key,
+                        Double.NEGATIVE_INFINITY,   // min
+                        lastTimestamp - 1,          // max
+                        0,
+                        size
+                );
+
+        return raw == null ? Collections.emptyList() : new ArrayList<>(raw);
+    }
+
+    public void removeFromLiked(Long userId, Long postId) {
+        String key = "liked:" + userId;
+        redis.opsForZSet().remove(key, postId);
     }
 
     public List<Long> getRandomZSetMembers(String key, int sampleCount) {

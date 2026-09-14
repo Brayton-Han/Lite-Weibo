@@ -54,9 +54,8 @@ public class CommentQueueThroughputTest implements CommandLineRunner {
         
         long endTime = startTime + (DURATION_SECONDS * 1000);
         while (System.currentTimeMillis() < endTime) {
-            long timestamp = System.currentTimeMillis();
+            // 发送时间由 Event 基类构造时自动记录 (Event#timestamp)
             CommentEvent event = new CommentEvent(
-                timestamp,          // 毫秒时间戳，用于延迟计算
                 1L,                 // fromUserId
                 2L,                 // toUserId  
                 100L,               // postId

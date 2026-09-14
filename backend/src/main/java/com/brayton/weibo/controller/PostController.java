@@ -87,11 +87,12 @@ public class PostController {
 
     @GetMapping("/user/{uid}/liked")
     public ResponseEntity<ApiResponse<?>> getLikedPosts(
+            @AuthenticationPrincipal CustomUserDetails self,
             @PathVariable long uid,
             @RequestParam(required = false) Long cursor,
             @RequestParam(defaultValue = "10") int size
     ) {
-        LikedPostsResponse posts = postService.getLikedPosts(uid, cursor, size);
+        LikedPostsResponse posts = postService.getLikedPosts(uid, self.getId(), cursor, size);
         return ResponseEntity.ok(ApiResponse.success(posts));
     }
 
