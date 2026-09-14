@@ -314,11 +314,13 @@ public class PostService {
     }
 
 
-    @Async
-    public void pushPostToFollowersFeed(Post post) {
+    /**
+     * 计算一条帖子应当写入哪些用户的 feed（作者本人 + 按可见性展开的受众）。
+     * 抽出为独立方法，供实时扇出和缓存回灌复用，避免两处规则漂移。
+     */
+    public Set<Long> resolveFeedTargets(Post post) {
         Long authorId = post.getUser().getId();
         PostVisibility visibility = post.getVisibility();
-        long ts = TimeUtil.toTs(post.getCreatedAt());
 
         Set<Long> pushIds = new HashSet<>();
 
@@ -337,11 +339,30 @@ public class PostService {
             pushIds.addAll(followerIds);
         }
 
+        return pushIds;
+    }
+
+    /**
+     * 把一条帖子写入目标用户的 feed。回灌场景下 notify=false，
+     * 避免为历史帖子重复推送 WebSocket "新帖" 通知。
+     */
+    public int fanOutToFeed(Post post, boolean notify) {
+        Long authorId = post.getUser().getId();
+        long ts = TimeUtil.toTs(post.getCreatedAt());
+        Set<Long> pushIds = resolveFeedTargets(post);
+
         for (Long pushId : pushIds) {
             redisService.addToFeed(pushId, post.getId(), ts);
-            if (pushId.equals(authorId)) continue;
+            if (!notify || pushId.equals(authorId)) continue;
             wsPusher.notifyUserNewPost(pushId);
         }
+
+        return pushIds.size();
+    }
+
+    @Async
+    public void pushPostToFollowersFeed(Post post) {
+        fanOutToFeed(post, true);
     }
 
     @Transactional
