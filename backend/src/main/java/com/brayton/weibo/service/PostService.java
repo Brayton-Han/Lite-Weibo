@@ -18,6 +18,7 @@ import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
@@ -89,18 +90,36 @@ public class PostService {
 
 
     // !!! USE FOR NEWEST/FOLLOWING/LIKED POST TIMELINE !!!
+    /**
+     * 帖子的 visibility 设置是否允许 viewer 看到——纯粹的可见性规则，不含任何 feed 语义。
+     * 与 SQL 版本的 {@link #visibilityFilter} 保持同一套判定，两者必须一起改。
+     */
     private boolean isVisibleToUser(Post post, boolean self, boolean following, boolean followed) {
         // 自己永远能看到自己的帖子
         if (self) return true;
 
-        // 已取关
-        if (!following) return false;
-
         return switch (post.getVisibility()) {
-            case PUBLIC, FOLLOWERS -> true;
-            case PRIVATE -> false;
-            case FRIENDS -> followed;
+            case PUBLIC    -> true;              // 公开帖不要求关注关系
+            case FOLLOWERS -> following;         // 粉丝可见：viewer 关注了作者
+            case FRIENDS   -> following && followed;  // 好友可见：必须互关
+            case PRIVATE   -> false;
         };
+    }
+
+    /**
+     * feed 专用判定：在可见性之上，额外要求 viewer 目前仍然关注作者。
+     *
+     * feed 采用写扩散，帖子在发布时就被写进了当时各关注者的 ZSet；若之后取关，
+     * ZSet 里的残留条目不应再展示，这条规则就是为此而设。
+     *
+     * liked 列表不经过扇出（条目来自用户自己的点赞行为，与关注关系无关），
+     * 因此只走 {@link #isVisibleToUser}，不适用这条额外限制。
+     */
+    private boolean isVisibleInFeed(Post post, boolean self, boolean following, boolean followed) {
+        // 已取关：扇出时写进来的残留条目
+        if (!self && !following) return false;
+
+        return isVisibleToUser(post, self, following, followed);
     }
 
     public List<PostResponse> getNewestFeed(Long userId, Long lastTimestamp, int size) {
@@ -142,7 +161,7 @@ public class PostService {
                 boolean followed  = sameUser || followedByIds.contains(authorId);
                 boolean isLiked = likedPostIds.contains(post.getId());
 
-                if (isVisibleToUser(post, sameUser, following, followed)) {
+                if (isVisibleInFeed(post, sameUser, following, followed)) {
                     result.add(buildPostResponse(post, userId, following, followed, isLiked));
                 }
 
@@ -177,7 +196,7 @@ public class PostService {
             boolean following = followRepository.existsByFollowerIdAndFollowingId(userId, authorId);
             boolean followed = followRepository.existsByFollowerIdAndFollowingId(authorId, userId);
 
-            if (isVisibleToUser(p, false, following, followed)) {
+            if (isVisibleInFeed(p, false, following, followed)) {
                 visiblePosts.add(buildPostResponse(p, userId, true, followed));
             }
         }
@@ -198,42 +217,81 @@ public class PostService {
         );
     }
 
-    public LikedPostsResponse getLikedPosts(Long userId, Long lastTimestamp, int size) {
+    /**
+     * 查看 userId 点赞过的帖子列表。
+     *
+     * 方法内有两个身份，不能混用：
+     *  - userId：点赞列表的主人，决定读哪条 liked: ZSet、哪些 Like 记录算数；
+     *  - currentUserId：发起请求的人，决定每条帖子是否可见、liked 标记怎么算。
+     * 早期版本两处都用 userId，导致 A 能看到 B 点赞过的、本不该对 A 可见的帖子。
+     */
+    public LikedPostsResponse getLikedPosts(Long userId, Long currentUserId, Long lastTimestamp, int size) {
 
         long cursor = lastTimestamp == null ? Long.MAX_VALUE : lastTimestamp;
         List<PostResponse> result = new ArrayList<>();
 
         while (result.size() < size) {
-            Set<Object> postIds = redisService.getLikedAfter(userId, cursor, size);
-            if (postIds.isEmpty()) break;
+            // 游标必须由 ZSet 的 score 推进，不能由 DB 的 Like.createdAt 推进：
+            // liked: ZSet 里可能残留 DB 中已不存在的幽灵条目（取消点赞时未清理、
+            // 或帖子被软删除后 findByIdIn 查不到）。若这一批全是幽灵条目，
+            // 基于 Like 记录的游标会原地不动，外层 while 反复取同一窗口 → 死循环。
+            List<ZSetOperations.TypedTuple<Object>> entries =
+                    redisService.getLikedAfterWithScores(userId, cursor, size);
+            if (entries.isEmpty()) break;
+
+            Set<Object> postIds = entries.stream()
+                    .map(ZSetOperations.TypedTuple::getValue)
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toCollection(LinkedHashSet::new));
 
             List<Post> posts = postRepository.findByIdIn(postIds);
             Map<Long, Post> map = posts.stream()
                     .collect(Collectors.toMap(Post::getId, p -> p));
 
-            List<Post> ordered = postIds.stream()
-                    .map(id -> map.get(Long.valueOf(id.toString())))
-                    .filter(Objects::nonNull)
-                    .toList();
+            long advanced = cursor;
 
-            for (Post post : ordered) {
-                if (result.size() >= size) break;
+            for (ZSetOperations.TypedTuple<Object> entry : entries) {
+                Object rawId = entry.getValue();
+                Double score = entry.getScore();
+                if (rawId == null || score == null) continue;
 
-                Like like = likeRepository.findByUserIdAndPostId(userId, post.getId())
-                        .orElse(null);
-                if (like == null) continue;
+                Long postId = Long.valueOf(rawId.toString());
+                Post post = map.get(postId);
+                Like like = post == null ? null
+                        : likeRepository.findByUserIdAndPostId(userId, postId).orElse(null);
 
-                Long authorId = post.getUser().getId();
-                boolean sameUser = authorId.equals(userId);
-                boolean following = sameUser || followRepository.existsByFollowerIdAndFollowingId(userId, authorId);
-                boolean followed = sameUser || followRepository.existsByFollowerIdAndFollowingId(authorId, userId);
+                if (post == null || like == null) {
+                    // 幽灵条目：帖子已删除，或已取消点赞但 ZSet 未清理。
+                    // 顺手清掉，避免后续分页反复扫到。
+                    redisService.removeFromLiked(userId, postId);
+                } else {
+                    // 可见性一律按请求者（currentUserId）与帖子作者的关系计算，
+                    // 而不是按列表主人，否则会越权泄露对请求者不可见的帖子
+                    Long authorId = post.getUser().getId();
+                    boolean sameUser = authorId.equals(currentUserId);
+                    boolean following = sameUser || followRepository.existsByFollowerIdAndFollowingId(currentUserId, authorId);
+                    boolean followed = sameUser || followRepository.existsByFollowerIdAndFollowingId(authorId, currentUserId);
 
-                if (isVisibleToUser(post, sameUser, following, followed)) {
-                    result.add(buildPostResponse(post, userId, following, followed));
+                    // 仅当前不可见，点赞关系仍然有效，不做清理
+                    if (isVisibleToUser(post, sameUser, following, followed)) {
+                        // liked 标记同样按请求者算：这里要回答"我赞过吗"，不是"列表主人赞过吗"
+                        result.add(buildPostResponse(post, currentUserId, following, followed));
+                    }
                 }
 
-                cursor = TimeUtil.toTs(like.getCreatedAt());
+                // 这一条已处理完，游标推进到它；幽灵条目同样推进，这是不死循环的关键
+                advanced = score.longValue();
+
+                // 装满即停，游标停在最后处理的这一条，下一页从它之后继续，不跳数据
+                if (result.size() >= size) break;
             }
+
+            // 游标必须严格递减，否则下一轮会取到完全相同的窗口
+            if (advanced >= cursor) break;
+            cursor = advanced;
+
+            // 本批不足 size，说明 ZSet 已取尽
+            if (entries.size() < size) break;
         }
 
         return new LikedPostsResponse(result, cursor);
