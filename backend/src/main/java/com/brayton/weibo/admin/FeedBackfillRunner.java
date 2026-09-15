@@ -2,7 +2,7 @@ package com.brayton.weibo.admin;
 
 import com.brayton.weibo.entity.Post;
 import com.brayton.weibo.repository.PostRepository;
-import com.brayton.weibo.service.PostService;
+import com.brayton.weibo.service.FeedWriteService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.data.domain.Page;
@@ -16,7 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
  *
  * feed 采用写扩散：发帖时才把 postId 写进各接收者的 Redis ZSET feed:{userId}，
  * 读路径不回源数据库。因此 Redis 数据丢失后，历史帖子不会再出现在任何 feed 里。
- * 本工具按与实时扇出完全相同的规则（PostService#resolveFeedTargets）重建索引。
+ * 本工具按与实时扇出完全相同的规则（FeedWriteService#resolveFeedTargets）重建索引。
  *
  * 触发方式（一次性，跑完即退出）：
  *   FEED_BACKFILL=true ./mvnw spring-boot:run
@@ -32,7 +32,7 @@ public class FeedBackfillRunner implements CommandLineRunner {
     private static final int BATCH_SIZE = 200;
 
     private final PostRepository postRepository;
-    private final PostService postService;
+    private final FeedWriteService feedWriteService;
 
     @Override
     @Transactional(readOnly = true)
@@ -55,7 +55,7 @@ public class FeedBackfillRunner implements CommandLineRunner {
                     PageRequest.of(page, BATCH_SIZE, Sort.by(Sort.Direction.ASC, "id")));
 
             for (Post post : posts.getContent()) {
-                entryCount += postService.fanOutToFeed(post, false);
+                entryCount += feedWriteService.fanOutExistingPost(post);
                 postCount++;
             }
 

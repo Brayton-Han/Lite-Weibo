@@ -17,7 +17,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -34,22 +33,7 @@ public class FollowService {
     private final UserService userService;
     private final RedisService redisService;
     private final ApplicationEventPublisher publisher;
-
-    @Async
-    public void newFollowPostWarmUp(long followerId, long followingId) {
-
-        boolean followed = followRepository.existsByFollowerIdAndFollowingId(followingId, followerId);
-        List<Post> posts = postRepository.findNewestPosts(
-                Set.of(followingId),
-                PostService.visibilityFilter(false, true, followed),
-                Long.MAX_VALUE,
-                PageRequest.of(0, 20)
-        );
-        for (Post post : posts) {
-            redisService.addToFeed(followerId, post.getId(), TimeUtil.toTs(post.getCreatedAt()));
-        }
-        redisService.trimFeed(followerId, 1000);
-    }
+    private final FeedWriteService feedWriteService;
 
     @Transactional
     public void follow(long followerId, long followingId) {
@@ -66,8 +50,8 @@ public class FollowService {
 
         publisher.publishEvent(new FollowEvent(followerId, followingId));
 
-        // warm-up
-        newFollowPostWarmUp(followerId, followingId);
+        // warm-up：跨 Bean 调用才会走 @Async 代理
+        feedWriteService.warmUpNewFollow(followerId, followingId);
     }
 
     @Transactional

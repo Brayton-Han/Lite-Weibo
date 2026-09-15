@@ -12,7 +12,6 @@ import com.brayton.weibo.repository.UserRepository;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -24,15 +23,7 @@ public class LikeService {
     private final PostRepository postRepository;
     private final ApplicationEventPublisher publisher;
     private final UserRepository userRepository;
-
-    @Async
-    public void updateLikedPost(Like like) {
-        redisService.addToLiked(
-                like.getUserId(),
-                like.getPostId(),
-                TimeUtil.toTs(like.getCreatedAt())
-        );
-    }
+    private final FeedWriteService feedWriteService;
 
     @Transactional
     public void likePost(Long userId, Long postId) {
@@ -61,7 +52,8 @@ public class LikeService {
             publisher.publishEvent(new LikeEvent(userId, post.getUser().getId(), postId));
         }
 
-        updateLikedPost(saved);
+        // 跨 Bean 调用才会走 @Async 代理；只传原始值
+        feedWriteService.recordLiked(userId, postId, TimeUtil.toTs(saved.getCreatedAt()));
     }
 
     @Transactional
