@@ -1,6 +1,6 @@
 services:
   postgresql:
-    image: postgres:15
+    image: pgvector/pgvector:pg15
     container_name: postgresql_weibo
     environment:
       POSTGRES_DB: weibo
