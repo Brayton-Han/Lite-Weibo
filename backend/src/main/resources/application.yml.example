@@ -1,0 +1,53 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/weibo
+    username: postgres
+    password: CHANGE_ME
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+  flyway:
+    enabled: true
+  jackson:
+    serialization:
+      fail-on-empty-beans: false
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      timeout: 3000
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 0
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 20MB
+
+server:
+  port: 8080
+
+jwt:
+  secret: CHANGE_ME_USE_A_LONG_RANDOM_STRING
+
+r2:
+  accountId: "CHANGE_ME"
+  accessKey: "CHANGE_ME"
+  secretKey: "CHANGE_ME"
+  bucket: "weibo-images"
+  publicBaseUrl: "https://CHANGE_ME.r2.dev"
+
+# ─────────────────────────────────────────────────────────────
+# 用法：cp application.yml.example application.yml，填入真实值。
+#
+# application.yml 已在 backend/.gitignore 中，不会被提交。
+#
+# ⚠️ jwt.secret 的旧值曾出现在 git 历史（b6df1316 等提交中），
+#    本地务必换成新的随机串，且不要在任何部署环境复用旧值。
+# ─────────────────────────────────────────────────────────────

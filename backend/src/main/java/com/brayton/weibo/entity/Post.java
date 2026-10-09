@@ -6,7 +6,6 @@ import com.brayton.weibo.enums.PostType;
 import com.brayton.weibo.enums.PostVisibility;
 import jakarta.persistence.*;
 import jakarta.persistence.Table;
-import jakarta.persistence.Index;
 import lombok.*;
 import org.hibernate.annotations.*;
 
@@ -14,11 +13,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 @Entity
-@Table(name = "posts",
-        indexes = {
-                @Index(name = "idx_posts_created_id", columnList = "created_at,id"),
-                @Index(name = "idx_posts_user_created", columnList = "user_id,created_at")
-        })
+@Table(name = "posts")
 @Data
 @Builder
 @AllArgsConstructor
@@ -66,7 +61,7 @@ public class Post {
     private Long commentCount = 0L;
 
     // 评论数
-    @Column(nullable = false, columnDefinition = "bigint default 0")
+    @Column(nullable = false)
     private Long repostCount = 0L;
 
     // 审核状态 normal / reviewing / blocked

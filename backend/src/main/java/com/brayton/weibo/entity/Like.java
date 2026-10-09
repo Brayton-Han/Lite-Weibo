@@ -10,12 +10,7 @@ import org.hibernate.annotations.CreationTimestamp;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(
-        name = "likes",
-        uniqueConstraints = {
-                @UniqueConstraint(columnNames = {"user_id", "post_id"})
-        }
-)
+@Table(name = "likes")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor

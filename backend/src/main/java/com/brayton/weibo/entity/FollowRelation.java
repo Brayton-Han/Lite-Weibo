@@ -7,11 +7,7 @@ import lombok.NoArgsConstructor;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "follows",
-        uniqueConstraints = {
-                @UniqueConstraint(columnNames = {"follower_id", "following_id"})
-        },
-        indexes = {@Index(name = "idx_following_follower", columnList = "following_id,follower_id")})
+@Table(name = "follows")
 @Getter
 @NoArgsConstructor
 public class FollowRelation {
