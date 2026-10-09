@@ -36,7 +36,7 @@ class EmbeddingWriteServiceTest {
         when(repo.findChunkText(7L)).thenReturn(Optional.of("今天加班到十点"));
         when(client.embedDocuments(List.of("今天加班到十点"))).thenReturn(List.of(vec));
 
-        assertThat(service.syncPost(7L)).isEqualTo(new SyncResult(1, 0, 0, 0));
+        assertThat(service.syncPost(7L)).isEqualTo(new SyncResult(1, 0, 0, 0, 0));
 
         verify(repo).replaceIfCurrent(7L, "今天加班到十点", vec, MODEL);
     }
@@ -48,7 +48,7 @@ class EmbeddingWriteServiceTest {
         when(repo.findStoredChunkText(7L, MODEL)).thenReturn(Optional.of("原来的正文"));
         when(client.embedDocuments(List.of("改过的正文"))).thenReturn(List.of(vec));
 
-        assertThat(service.syncPost(7L)).isEqualTo(new SyncResult(1, 0, 0, 0));
+        assertThat(service.syncPost(7L)).isEqualTo(new SyncResult(1, 0, 0, 0, 0));
 
         verify(repo).replaceIfCurrent(7L, "改过的正文", vec, MODEL);
     }
@@ -59,7 +59,7 @@ class EmbeddingWriteServiceTest {
         when(repo.findChunkText(7L)).thenReturn(Optional.of("正文"));
         when(repo.findStoredChunkText(7L, MODEL)).thenReturn(Optional.of("正文"));
 
-        assertThat(service.syncPost(7L)).isEqualTo(new SyncResult(0, 0, 1, 0));
+        assertThat(service.syncPost(7L)).isEqualTo(new SyncResult(0, 0, 1, 0, 0));
 
         verify(client, never()).embedDocuments(anyList());
     }
@@ -69,9 +69,25 @@ class EmbeddingWriteServiceTest {
         when(repo.findChunkText(8L)).thenReturn(Optional.empty());
         when(repo.deleteIfIneligible(8L)).thenReturn(1);
 
-        assertThat(service.syncPost(8L)).isEqualTo(new SyncResult(0, 1, 0, 0));
+        assertThat(service.syncPost(8L)).isEqualTo(new SyncResult(0, 1, 0, 0, 0));
 
         verify(client, never()).embedDocuments(anyList());
+    }
+
+    @Test
+    void deletedPostRemovesOwnVectorsAndStripsQuotedText() {
+        // 原帖 10 被删：自身向量删除；转发并评论它的 11 不再拼原文，重新向量化
+        float[] v11 = {2f};
+        when(repo.findQuotingPostIds(10L)).thenReturn(List.of(11L));
+        when(repo.findChunkText(10L)).thenReturn(Optional.empty());
+        when(repo.deleteIfIneligible(10L)).thenReturn(1);
+        when(repo.findChunkText(11L)).thenReturn(Optional.of("好烦啊"));
+        when(repo.findStoredChunkText(11L, MODEL)).thenReturn(Optional.of("好烦啊\n\n[转发原文] 原文"));
+        when(client.embedDocuments(List.of("好烦啊"))).thenReturn(List.of(v11));
+
+        assertThat(service.syncPost(10L)).isEqualTo(new SyncResult(1, 1, 0, 0, 0));
+
+        verify(repo).replaceIfCurrent(11L, "好烦啊", v11, MODEL);
     }
 
     @Test
@@ -85,7 +101,7 @@ class EmbeddingWriteServiceTest {
         when(client.embedDocuments(List.of("新原文", "好烦啊\n\n[转发原文] 新原文")))
                 .thenReturn(List.of(v10, v11));
 
-        assertThat(service.syncPost(10L)).isEqualTo(new SyncResult(2, 0, 0, 0));
+        assertThat(service.syncPost(10L)).isEqualTo(new SyncResult(2, 0, 0, 0, 0));
 
         verify(client, times(1)).embedDocuments(anyList());
         verify(repo).replaceIfCurrent(11L, "好烦啊\n\n[转发原文] 新原文", v11, MODEL);
@@ -97,7 +113,7 @@ class EmbeddingWriteServiceTest {
         when(client.embedDocuments(anyList())).thenReturn(List.of(new float[]{0f}));
         when(repo.replaceIfCurrent(eq(7L), eq("v1"), any(), eq(MODEL))).thenReturn(false);
 
-        assertThat(service.syncPost(7L)).isEqualTo(new SyncResult(0, 0, 0, 1));
+        assertThat(service.syncPost(7L)).isEqualTo(new SyncResult(0, 0, 0, 1, 0));
     }
 
     @Test
@@ -105,7 +121,7 @@ class EmbeddingWriteServiceTest {
         when(repo.findChunkText(9L)).thenReturn(Optional.of("x"));
         when(client.embedDocuments(anyList())).thenThrow(new EmbeddingException("HTTP 429"));
 
-        assertThat(service.syncPost(9L)).isEqualTo(new SyncResult(0, 0, 0, 0));
+        assertThat(service.syncPost(9L)).isEqualTo(new SyncResult(0, 0, 0, 0, 1));
 
         verify(repo, never()).replaceIfCurrent(anyLong(), anyString(), any(), anyString());
     }

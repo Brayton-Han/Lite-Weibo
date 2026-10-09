@@ -38,7 +38,7 @@ import java.util.Optional;
  *
  * <h3>失败怎么办</h3>
  * 不重试，只记日志。帖子照常可见，只是暂时不能被语义搜索命中（编辑场景下命中的是旧内容）；
- * 新帖漏掉的向量由 EmbeddingBackfillRunner 补齐。查漏 SQL 见 RAG_ROADMAP Day 6。
+ * 漏掉的、过期的、本该删掉的向量，都由重跑 EmbeddingBackfillRunner 修复（它会先做一遍校正）。查漏 SQL 见 RAG_ROADMAP Day 6。
  */
 @Slf4j
 @Service
@@ -55,8 +55,8 @@ public class EmbeddingWriteService {
         log.debug("帖子 {} 向量同步：{}", e.postId(), r);
     }
 
-    /** 同步该帖及引用它的帖子的向量。 */
-    SyncResult syncPost(long postId) {
+    /** 同步该帖及引用它的帖子的向量。EmbeddingBackfillRunner 修复过期向量时也走这里。 */
+    public SyncResult syncPost(long postId) {
         List<Long> ids = new ArrayList<>();
         ids.add(postId);
         ids.addAll(embeddingRepository.findQuotingPostIds(postId));
@@ -79,7 +79,7 @@ public class EmbeddingWriteService {
             }
         }
         if (pendingIds.isEmpty()) {
-            return new SyncResult(0, removed, unchanged, 0);
+            return new SyncResult(0, removed, unchanged, 0, 0);
         }
 
         List<float[]> vectors;
@@ -88,7 +88,7 @@ public class EmbeddingWriteService {
         } catch (EmbeddingException ex) {
             // 预期内的外部故障（限流重试耗尽、未配 key 等）：一行日志足够，不需要堆栈
             log.warn("帖子 {} 向量化失败，可由 EmbeddingBackfillRunner 补齐：{}", pendingIds, ex.getMessage());
-            return new SyncResult(0, removed, unchanged, 0);
+            return new SyncResult(0, removed, unchanged, 0, pendingIds.size());
         }
 
         int embedded = 0;
@@ -101,7 +101,7 @@ public class EmbeddingWriteService {
                 superseded++;
             }
         }
-        return new SyncResult(embedded, removed, unchanged, superseded);
+        return new SyncResult(embedded, removed, unchanged, superseded, 0);
     }
 
     /**
@@ -109,6 +109,7 @@ public class EmbeddingWriteService {
      * @param removed    删除的向量行数
      * @param unchanged  内容未变、跳过的帖子数
      * @param superseded 向量化期间内容又变了、放弃写入的帖子数
+     * @param failed     调用 embedding API 失败、没有写入的帖子数
      */
-    record SyncResult(int embedded, int removed, int unchanged, int superseded) {}
+    public record SyncResult(int embedded, int removed, int unchanged, int superseded, int failed) {}
 }

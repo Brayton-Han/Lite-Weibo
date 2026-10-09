@@ -600,18 +600,32 @@
     且 Day 7 的指标是按帖子算的，重复会让 Recall/nDCG 失真
   - 现状：库里最长 659 字、p50 77 字，语料帖都 ≤200 字——**当前数据没有帖子需要切**，
     这一条的价值在于真实用户长帖，以及在 `DESIGN.md` 里讲清楚 chunk 策略
-- [ ] 删帖时删除对应向量（`ON DELETE CASCADE` 对**软删除无效**——你用的是 `@SQLDelete`，
+- [x] 删帖时删除对应向量（`ON DELETE CASCADE` 对**软删除无效**——你用的是 `@SQLDelete`，
       物理行还在，所以要显式删 `post_embeddings`，或在检索时过滤 `deleted = false`）
-- [ ] **决定并记录**：走显式删除还是读时过滤？
+- [x] **决定并记录**：走显式删除还是读时过滤？
       （建议读时过滤 + 定期清理，与项目现有的 `liked:` ZSet 自愈思路一致）
-- [ ] 失败可观测：`AsyncUncaughtExceptionHandler` 记录 + 一个能查"哪些帖子没有向量"的 SQL
-  - 增量路径对 `EmbeddingException` 只打一行 WARN、不重试；补齐就是重跑 `EmbeddingBackfillRunner`。查漏：
-    ```sql
-    SELECT p.id, p.created_at FROM posts p
-    WHERE p.deleted = false AND p.visibility = 0 AND btrim(p.content) <> ''
-      AND NOT EXISTS (SELECT 1 FROM post_embeddings e
-                      WHERE e.post_id = p.id AND e.model_id = 'voyage/voyage-4');
+  - **定案：显式删除为主 + 读时过滤兜底 + 回填时校正**，没有照原建议只做读时过滤。决定性的理由是转发帖：
+    「转发并评论」的 chunk_text 拼着原帖正文，原帖删除后，读时过滤只看转发帖自己的 `deleted`，
+    拿原帖的话去搜仍能经由转发帖的向量命中。定期清理也只清已删帖子的向量，同样管不到它
+  - 显式删除：`deletePost` 发出 `PostEmbeddingEvent`，复用 `syncPost`——删除自身向量，转发帖去掉原文后重新向量化
+  - 读时过滤：语义检索 SQL 本就要 JOIN posts，写上 `deleted = false AND visibility = 0`，
+    挡住异步删除的约 0.3s 窗口与失败残留（**待写检索端点时落实**）
+  - 回填时校正：`EmbeddingBackfillRunner` 先扫已有向量，残留的删除、过期的（含原帖已删的转发帖）交给 `syncPost` 重做，
+    再补缺。只比对当前模型，换模型时不会逐条重算全库
+  - 项目没有恢复删帖的功能（`deleted` 只会 false → true），读时过滤「恢复零成本」的优势用不上
+- [x] 失败可观测：`AsyncUncaughtExceptionHandler` 记录 + 一个能查"哪些帖子没有向量"的 SQL
+  - 日志：`EmbeddingException` 打一行 WARN（带 postId）；其余异常由 `AsyncUncaughtExceptionHandler` 打 ERROR + 堆栈；
+    队列满丢弃打 WARN，但拿不到是哪条帖子——所以不能只靠日志
+  - 查询：没有用纯 SQL，而是给回填加了只读体检模式，以数据库为准列出**缺失 / 残留 / 过期**三类帖子。
+    残留与过期的判定依赖 `PostChunker` 的拼接规则，写成 SQL 就是第二份规则，迟早漂移；体检与修复共用同一个 `classify`
+    ```bash
+    # 只读，不调 API、不写库、不需要 VOYAGE_API_KEY；backend 容器占着 8080 时加 server.port=0
+    EMBEDDING_BACKFILL=true EMBEDDING_BACKFILL_DRY_RUN=true ./mvnw spring-boot:run \
+      -Dspring-boot.run.profiles=tools -Dspring-boot.run.arguments=--server.port=0
     ```
+    去掉 `EMBEDDING_BACKFILL_DRY_RUN` 即修复（先校正残留 / 过期，再补缺）
+  - 首跑（2026-10-09）：缺失 1 条（6181，自动向量化上线前发布）、残留 0、过期 0
+  - 未做：指标与告警（项目没有 actuator / micrometer），发现问题仍要人去跑体检
 - [ ] 新建端点 `GET /posts/search/semantic?q=...`（纯向量，临时用于 Phase 2 打分）
 
 ### ✅ 验收标准

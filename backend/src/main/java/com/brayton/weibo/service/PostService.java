@@ -467,6 +467,10 @@ public class PostService {
 
         // 3. 删帖子
         postRepository.deleteById(postId);
+
+        // 删除向量，并重算「转发并评论」了它的帖子（它们的 chunk_text 里拼着本帖正文）。
+        // 软删除不会触发 ON DELETE CASCADE，读时过滤也管不到转发帖，所以必须显式处理
+        publisher.publishEvent(new PostEmbeddingEvent(postId));
     }
 
     @Transactional
