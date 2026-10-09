@@ -501,6 +501,9 @@ public class PostService {
                     saved.getId(), currentUserId, saved.getVisibility(), TimeUtil.toTs(saved.getCreatedAt())));
         }
 
+        // 内容或可见性变了都要同步向量（含删除）；没有实质变化时 EmbeddingWriteService 会比对后跳过
+        publisher.publishEvent(new PostEmbeddingEvent(saved.getId()));
+
         return buildPostResponse(saved, currentUserId, true, true);
     }
 }

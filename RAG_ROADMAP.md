@@ -582,7 +582,14 @@
       - 独立线程池 `embeddingTaskExecutor`（2 线程、队列 1000、满了丢弃）：429 退避单任务可阻塞一分钟以上，
         共用 feed 池会饿死扇出；不用 CallerRuns 是因为不能让发帖请求同步等第三方 API，漏掉的由回填补齐
 - [x] 在 `PostService.createPost` 提交后触发向量化（`AFTER_COMMIT`，仅 PUBLIC 帖）
-- [ ] 编辑帖子（`isEdited`）时重新向量化
+- [x] 编辑帖子（`isEdited`）时重新向量化
+  - 新建与编辑共用 `PostEmbeddingEvent` → `EmbeddingWriteService.syncPost`：算出当前 chunk_text 与入库的比对，
+    相同则跳过（只改图片不花钱），不同则重新向量化，不再需要向量（改为非公开）则删除
+  - 同时重算「转发并评论」了该帖的帖子：它们的 chunk_text 拼着原帖正文；原帖改为非公开后若不重算，
+    非公开内容仍会被语义搜索召回。按 `ref_post_id` 查询，补了索引（V4）
+  - 并发编辑：写入前 `SELECT ... FOR UPDATE` 锁住 posts 行并在锁内重算 chunk_text，
+    已变化则放弃（后一次编辑会发出自己的事件），避免先读后写的任务留下过期向量
+  - 内容变化时删除该帖**所有模型**的旧向量再写当前模型：过期比缺失更糟，缺失能被回填发现，过期不会
 - [ ] **长文切片**（Day 5 回填时暂按一帖一 chunk，`chunk_index` 恒为 0）：
   - 抽一个 `PostChunker`，供 `EmbeddingBackfillRunner` 与 `EmbeddingWriteService` **共用**，
     保证存量与增量的切法一致——否则同一条帖子回填和新发会产出不同的 chunk
