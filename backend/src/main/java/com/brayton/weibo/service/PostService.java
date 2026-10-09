@@ -12,6 +12,7 @@ import com.brayton.weibo.enums.PostVisibility;
 import com.brayton.weibo.error.CommonErrorCode;
 import com.brayton.weibo.error.WeiboException;
 import com.brayton.weibo.event.LikeEvent;
+import com.brayton.weibo.event.PostFanOutEvent;
 import com.brayton.weibo.repository.*;
 import com.brayton.weibo.webSocket.WebSocketPusher;
 import jakarta.transaction.Transactional;
@@ -36,7 +37,7 @@ public class PostService {
     private final CommentRepository commentRepository;
     private final RedisService redisService;
     private final WebSocketPusher wsPusher;
-    private final FeedWriteService feedWriteService;
+    private final ApplicationEventPublisher publisher;
 
     /**
      * 根据 post 构建完整响应
@@ -130,44 +131,68 @@ public class PostService {
 
         while (result.size() < size) {
             int fetch = Math.min(size * 5, 100);
-            List<Long> postIds = redisService.getFeedAfter(userId, cursor, fetch);
-            if (postIds.isEmpty()) break;
+            // 游标由 ZSet score 推进，不能由 DB 查到的帖子推进：若一批全是幽灵条目
+            // （帖子已删除），基于帖子的游标原地不动，外层 while 反复取同一窗口 → 死循环。
+            List<ZSetOperations.TypedTuple<Object>> entries =
+                    redisService.getFeedAfterWithScores(userId, cursor, fetch);
+            if (entries.isEmpty()) break;
+
+            List<Long> postIds = entries.stream()
+                    .map(ZSetOperations.TypedTuple::getValue)
+                    .filter(Objects::nonNull)
+                    .map(id -> Long.valueOf(id.toString()))
+                    .toList();
 
             List<Post> posts = postRepository.findByIdInWithUser(postIds);
             Map<Long, Post> postMap =
                     posts.stream().collect(Collectors.toMap(Post::getId, p -> p));
-            List<Post> orderedPosts = postIds.stream()
-                    .map(postMap::get)
-                    .filter(Objects::nonNull)
-                    .toList();
 
-            Set<Long> authorIds = orderedPosts.stream()
+            Set<Long> authorIds = posts.stream()
                     .map(p -> p.getUser().getId())
                     .collect(Collectors.toSet());
             Set<Long> followingIds = followRepository.findFollowingIds(userId, authorIds);
             Set<Long> followedByIds = followRepository.findFollowedByIds(userId, authorIds);
 
-            Set<Long> postIdSet = orderedPosts.stream()
-                    .map(Post::getId)
-                    .collect(Collectors.toSet());
+            Set<Long> likedPostIds = likeRepository.findLikedPostIds(userId, postMap.keySet());
 
-            Set<Long> likedPostIds = likeRepository.findLikedPostIds(userId, postIdSet);
+            long advanced = cursor;
 
-            for (Post post : orderedPosts) {
-                if (result.size() >= size) break;
+            for (ZSetOperations.TypedTuple<Object> entry : entries) {
+                Object rawId = entry.getValue();
+                Double score = entry.getScore();
+                if (rawId == null || score == null) continue;
 
-                Long authorId = post.getUser().getId();
-                boolean sameUser = authorId.equals(userId);
-                boolean following = sameUser || followingIds.contains(authorId);
-                boolean followed  = sameUser || followedByIds.contains(authorId);
-                boolean isLiked = likedPostIds.contains(post.getId());
+                Long postId = Long.valueOf(rawId.toString());
+                Post post = postMap.get(postId);
 
-                if (isVisibleInFeed(post, sameUser, following, followed)) {
-                    result.add(buildPostResponse(post, userId, following, followed, isLiked));
+                if (post == null) {
+                    // 幽灵条目：帖子已删除。扇出在事务提交后才执行，
+                    // 这里查不到不会是"尚未提交"，可以放心清理。
+                    redisService.removeFromFeed(userId, postId);
+                } else {
+                    Long authorId = post.getUser().getId();
+                    boolean sameUser = authorId.equals(userId);
+                    boolean following = sameUser || followingIds.contains(authorId);
+                    boolean followed  = sameUser || followedByIds.contains(authorId);
+                    boolean isLiked = likedPostIds.contains(postId);
+
+                    if (isVisibleInFeed(post, sameUser, following, followed)) {
+                        result.add(buildPostResponse(post, userId, following, followed, isLiked));
+                    }
                 }
 
-                cursor = TimeUtil.toTs(post.getCreatedAt());
+                // 幽灵条目同样推进游标，这是不死循环的关键
+                advanced = score.longValue();
+
+                if (result.size() >= size) break;
             }
+
+            // 游标必须严格递减，否则下一轮会取到完全相同的窗口
+            if (advanced >= cursor) break;
+            cursor = advanced;
+
+            // 本批不足 fetch，说明 ZSet 已取尽
+            if (entries.size() < fetch) break;
         }
 
         return result;
@@ -404,9 +429,9 @@ public class PostService {
             postRepository.incrementRepostCount(refPost.getId());
         }
 
-        // fan-out：跨 Bean 调用才会走 @Async 代理；只传原始值，不让实体跨线程
-        feedWriteService.fanOutNewPost(
-                saved.getId(), userId, saved.getVisibility(), TimeUtil.toTs(saved.getCreatedAt()));
+        // fan-out：事务提交后由 FeedWriteService#onPostFanOut 异步执行
+        publisher.publishEvent(new PostFanOutEvent(
+                saved.getId(), userId, saved.getVisibility(), TimeUtil.toTs(saved.getCreatedAt())));
 
         return buildPostResponse(saved, userId, true, true, false); // 返回新帖详情
     }
@@ -465,8 +490,8 @@ public class PostService {
 
         // 🍿 修补 timeline
         if (saved.getVisibility().ordinal() < oldVisibility.ordinal()) {
-            feedWriteService.fanOutNewPost(
-                    saved.getId(), currentUserId, saved.getVisibility(), TimeUtil.toTs(saved.getCreatedAt()));
+            publisher.publishEvent(new PostFanOutEvent(
+                    saved.getId(), currentUserId, saved.getVisibility(), TimeUtil.toTs(saved.getCreatedAt())));
         }
 
         return buildPostResponse(saved, currentUserId, true, true);

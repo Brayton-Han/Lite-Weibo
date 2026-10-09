@@ -4,6 +4,8 @@ import com.brayton.weibo.common.TimeUtil;
 import com.brayton.weibo.config.AsyncConfig;
 import com.brayton.weibo.entity.Post;
 import com.brayton.weibo.enums.PostVisibility;
+import com.brayton.weibo.event.FollowEvent;
+import com.brayton.weibo.event.PostFanOutEvent;
 import com.brayton.weibo.repository.FollowRepository;
 import com.brayton.weibo.repository.PostRepository;
 import com.brayton.weibo.webSocket.WebSocketPusher;
@@ -11,6 +13,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 
 import java.util.HashSet;
 import java.util.List;
@@ -28,9 +32,13 @@ import java.util.Set;
  * 方法中，实体一旦跨线程，持久化上下文已不可用，对 LAZY 关联（如 {@code Post.user}）
  * 取值会抛 LazyInitializationException。
  *
- * 注意：Redis 不参与数据库事务，主事务回滚时这里写入的索引会残留。该问题在改为
- * 异步之前就存在（同步版同样在事务提交前写 Redis），异步化并未引入新的一致性风险，
- * 根治需配合 AFTER_COMMIT 语义，见分析报告 §6.1-6。
+ * 发帖扇出与关注预热都由事件驱动，监听器挂在 AFTER_COMMIT 上：
+ *  - 主事务回滚时不会触发，Redis 里不再残留指向不存在帖子的条目；
+ *  - WebSocket "新帖"通知一定晚于 DB 提交，客户端收到通知后拉 feed 必能查到；
+ *  - 线程池满触发 CallerRunsPolicy 时，同步执行也已在提交之后，不会拉长 DB 事务。
+ *
+ * 仍未解决：进程崩溃或扇出中途 Redis 出错时该次扇出丢失且不重试（只记日志），
+ * 需 Outbox / MQ 重试才能根治，见分析报告 §6.1-6。ZADD 幂等，届时重试是安全的。
  */
 @Service
 @RequiredArgsConstructor
@@ -40,6 +48,9 @@ public class FeedWriteService {
     private final PostRepository postRepository;
     private final RedisService redisService;
     private final WebSocketPusher wsPusher;
+
+    /** 每个用户 feed ZSet 的最大条目数，超出部分按时间从旧到新淘汰 */
+    public static final int FEED_MAX_SIZE = 1000;
 
     /**
      * 计算一条帖子应当写入哪些用户的 feed（作者本人 + 按可见性展开的受众）。
@@ -74,6 +85,7 @@ public class FeedWriteService {
 
         for (Long pushId : pushIds) {
             redisService.addToFeed(pushId, postId, timestamp);
+            redisService.trimFeed(pushId, FEED_MAX_SIZE);
             if (!notify || pushId.equals(authorId)) continue;
             wsPusher.notifyUserNewPost(pushId);
         }
@@ -92,15 +104,23 @@ public class FeedWriteService {
         );
     }
 
-    /** 发帖 / 可见性放宽后的扇出。 */
+    /**
+     * 发帖 / 可见性放宽后的扇出，事务提交后异步执行。
+     *
+     * fallbackExecution = true：无事务上下文时发布也立即执行，避免被静默丢弃。
+     */
     @Async(AsyncConfig.FEED_EXECUTOR)
-    public void fanOutNewPost(Long postId, Long authorId, PostVisibility visibility, long timestamp) {
-        fanOutToFeed(postId, authorId, visibility, timestamp, true);
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
+    public void onPostFanOut(PostFanOutEvent e) {
+        fanOutToFeed(e.postId(), e.authorId(), e.visibility(), e.timestamp(), true);
     }
 
-    /** 新建关注后，把被关注者的近期帖子灌入关注者的 feed。 */
+    /** 新建关注提交后，把被关注者的近期帖子灌入关注者的 feed。 */
     @Async(AsyncConfig.FEED_EXECUTOR)
-    public void warmUpNewFollow(long followerId, long followingId) {
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
+    public void onFollow(FollowEvent e) {
+        long followerId = e.getFollowerId();
+        long followingId = e.getFollowingId();
         boolean followed = followRepository.existsByFollowerIdAndFollowingId(followingId, followerId);
 
         List<Post> posts = postRepository.findNewestPosts(
@@ -113,7 +133,7 @@ public class FeedWriteService {
         for (Post post : posts) {
             redisService.addToFeed(followerId, post.getId(), TimeUtil.toTs(post.getCreatedAt()));
         }
-        redisService.trimFeed(followerId, 1000);
+        redisService.trimFeed(followerId, FEED_MAX_SIZE);
     }
 
     /** 点赞后写入 liked: 索引。 */

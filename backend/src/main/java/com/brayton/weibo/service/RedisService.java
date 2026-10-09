@@ -23,20 +23,29 @@ public class RedisService {
         redis.opsForZSet().add(key, postId, timestamp);
     }
 
-    public List<Long> getFeedAfter(Long userId, long lastTimestamp, int size) {
+    /**
+     * 按 score 倒序取 feed: ZSet 的一页，连同 score（帖子创建时间戳）一起返回。
+     * 理由同 {@link #getLikedAfterWithScores}：游标必须由 score 推进。
+     */
+    public List<ZSetOperations.TypedTuple<Object>> getFeedAfterWithScores(
+            Long userId, long lastTimestamp, int size) {
         String key = "feed:" + userId;
 
-        Set<Object> raw = redis.opsForZSet().reverseRangeByScore(
-                key,
-                Double.NEGATIVE_INFINITY,
-                lastTimestamp - 1,
-                0,
-                size
-        );
+        Set<ZSetOperations.TypedTuple<Object>> raw =
+                redis.opsForZSet().reverseRangeByScoreWithScores(
+                        key,
+                        Double.NEGATIVE_INFINITY,
+                        lastTimestamp - 1,
+                        0,
+                        size
+                );
 
-        return raw.stream()
-                .map(id -> Long.valueOf(id.toString()))
-                .toList();
+        return raw == null ? Collections.emptyList() : new ArrayList<>(raw);
+    }
+
+    public void removeFromFeed(Long userId, Long postId) {
+        String key = "feed:" + userId;
+        redis.opsForZSet().remove(key, postId);
     }
 
     public void trimFeed(long userId, int maxSize) {

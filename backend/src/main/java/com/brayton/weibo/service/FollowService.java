@@ -33,7 +33,6 @@ public class FollowService {
     private final UserService userService;
     private final RedisService redisService;
     private final ApplicationEventPublisher publisher;
-    private final FeedWriteService feedWriteService;
 
     @Transactional
     public void follow(long followerId, long followingId) {
@@ -48,10 +47,8 @@ public class FollowService {
         userRepository.incrementFollowerCountById(followingId);
         userRepository.incrementFollowCountById(followerId);
 
+        // 通知投递与 feed 预热都监听此事件，均在事务提交后执行
         publisher.publishEvent(new FollowEvent(followerId, followingId));
-
-        // warm-up：跨 Bean 调用才会走 @Async 代理
-        feedWriteService.warmUpNewFollow(followerId, followingId);
     }
 
     @Transactional
