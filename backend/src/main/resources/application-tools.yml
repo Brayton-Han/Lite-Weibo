@@ -7,3 +7,11 @@
 spring:
   jpa:
     show-sql: false        # 导入 3000 条时 SQL 日志会淹没工具自己的输出
+  # 不消费 MQ：工具与 backend 容器同时运行时，NotificationService 的 @RabbitListener 会抢队列消息，
+  # 通知照常落库，但 WebSocket 推送从这个没有任何客户端连接的进程发出，实时推送就丢了
+  rabbitmq:
+    listener:
+      simple:
+        auto-startup: false
+      direct:
+        auto-startup: false
