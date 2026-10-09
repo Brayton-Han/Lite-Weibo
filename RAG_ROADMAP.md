@@ -161,10 +161,10 @@
 
 ### 🛠 开发 checklist
 
-- [ ] `docker-compose.yml` 中 `postgresql` 服务镜像改为 `pgvector/pgvector:pg15`
-- [ ] `docker compose down && docker compose up -d postgresql`（**注意**：`pgdata` 卷会保留，数据不丢）
-- [ ] 进容器验证：`psql -U postgres -d weibo -c "CREATE EXTENSION IF NOT EXISTS vector;"`
-- [ ] 验证版本：`SELECT extversion FROM pg_extension WHERE extname='vector';`
+- [x] `docker-compose.yml` 中 `postgresql` 服务镜像改为 `pgvector/pgvector:pg15`
+- [x] `docker compose down && docker compose up -d postgresql`（**注意**：`pgdata` 卷会保留，数据不丢）
+- [x] 进容器验证：`psql -U postgres -d weibo -c "CREATE EXTENSION IF NOT EXISTS vector;"`
+- [x] 验证版本：`SELECT extversion FROM pg_extension WHERE extname='vector';`
 - [ ] 跑一个 hello world：
   ```sql
   CREATE TABLE t (id int, v vector(3));
@@ -173,8 +173,8 @@
   DROP TABLE t;
   ```
   搞懂 `<=>`（余弦距离）、`<->`（L2）、`<#>`（内积）三个操作符的区别。
-- [ ] 申请 Anthropic API key，`export ANTHROPIC_API_KEY=...`，用 curl 打通一次
-- [ ] 申请 Voyage AI API key（或决定走本地 bge-m3 路线，见 Day 4）
+- [x] 申请 Anthropic API key，`export ANTHROPIC_API_KEY=...`，用 curl 打通一次
+- [x] 申请 Voyage AI API key（或决定走本地 bge-m3 路线，见 Day 4）
 
 ### ✅ 验收标准
 `SELECT 1 - (v <=> ...)` 能返回符合直觉的相似度排序；`curl` 能调通 Claude API。
@@ -197,7 +197,7 @@
 
 ### 🛠 开发 checklist
 
-- [ ] `pom.xml` 加依赖：
+- [x] `pom.xml` 加依赖：
   ```xml
   <dependency>
       <groupId>org.flywaydb</groupId>
@@ -209,18 +209,18 @@
   </dependency>
   ```
   （Flyway 10+ 起 PostgreSQL 支持被拆成独立模块，缺了会报 "Unsupported Database"）
-- [ ] 导出当前 schema 作为基线：
+- [x] 导出当前 schema 作为基线：
   ```bash
   docker exec postgresql_weibo pg_dump -U postgres -d weibo --schema-only > /tmp/baseline.sql
   ```
-- [ ] 创建 `backend/src/main/resources/db/migration/V1__baseline.sql`，内容为清理过的基线 DDL
-- [ ] **把手工建的 `search_vector` 列和 GIN 索引补进迁移**（修复 §6.2-15）：
+- [x] 创建 `backend/src/main/resources/db/migration/V1__baseline.sql`，内容为清理过的基线 DDL
+- [x] **把手工建的 `search_vector` 列和 GIN 索引补进迁移**（修复 §6.2-15）：
   ```sql
   ALTER TABLE posts ADD COLUMN IF NOT EXISTS search_vector tsvector
       GENERATED ALWAYS AS (to_tsvector('simple', content)) STORED;
   CREATE INDEX IF NOT EXISTS idx_posts_search_vector ON posts USING gin (search_vector);
   ```
-- [ ] `application.yml` 配置：
+- [x] `application.yml` 配置：
   ```yaml
   spring:
     jpa:
@@ -231,8 +231,9 @@
       baseline-on-migrate: true
       baseline-version: 1
   ```
-- [ ] 重启验证：`flyway_schema_history` 表存在且 `V1` 记录为 success，应用正常启动
-- [ ] **在一个全新的空库上验证一次**（这才是真正的测试）：
+- [x] 重启验证：`flyway_schema_history` 表存在且 `V1` 记录为 success，应用正常启动
+      （现有库上 V1 记录为 `<< Flyway Baseline >>`——这是标记而非执行，V1 的 SQL 从未在此库上跑过）
+- [ ] **在一个全新的空库上验证一次**（这才是真正的测试）⚠️ 截至 2026-10-08 未确认做过：
   ```bash
   docker exec postgresql_weibo psql -U postgres -c "CREATE DATABASE weibo_fresh;"
   # 改 datasource 指向 weibo_fresh，启动，确认 schema 被完整创建
@@ -296,35 +297,35 @@
       共核查 4 个候选，前 3 个（`SophonPlus/ChineseNlpCorpus` 的两份、Kaggle 转载、IEEE DataPort 转载）
       全部因**无许可**排除——它们是同一份无许可数据的不同托管点，
       而**许可不是镜像能提供的东西**：原始数据没有许可，转载多少次都不会产生许可
-- [ ] ⚠️ LWC 是 **SA（share-alike）** 许可：派生文本若提交到公开仓库会被卷入同一许可。
+- [x] ⚠️ LWC 是 **SA（share-alike）** 许可：派生文本若提交到公开仓库会被卷入同一许可。
       **语料文本不进 git**，只提交导入脚本与合成语料。SA 不传染代码
-- [ ] ⚠️ **噪声层必须主题中立**：混入情绪表达类内容会让噪声层含有与共鸣类 query 真正相关、
+- [x] ⚠️ **噪声层必须主题中立**：混入情绪表达类内容会让噪声层含有与共鸣类 query 真正相关、
       却不在 ground truth 里的帖子 → 假阴性 → Recall 被系统性压低，
       且**向量检索被罚得更重**（它更容易召回这些语义相关的帖子）。
       净效果是评测偏向词面检索，与你要证明的方向相反，而且不会报错
 - [ ] ⚠️ 「默认不相关」**不等于**「不参与标注」：未判定按不相关处理的前提是
       pooling 覆盖了所有待测系统的 top-k。噪声层不进 query 构造，
       但只要出现在 Day 8 的候选池里就必须照常做 0/1/2 判定
-- [ ] ⚠️ **不要爬微博**：`weibo.com/robots.txt` 对通用 UA 是 `Disallow: /` 且声明 `ai-train=no`，
+- [x] ⚠️ **不要爬微博**：`weibo.com/robots.txt` 对通用 UA 是 `Disallow: /` 且声明 `ai-train=no`，
       H5 接口匿名访问已被访客系统拦截（302 到 `visitor.passport.weibo.cn`）。
       合规风险之外，爬来的内容主题发散，正好踩中上表第一种失效模式
 
 **Step 2 · 合成靶区语料（~2100 条）**
 
-- [ ] 用 `claude-sonnet-5` 批量生成，走 **Batch API**（成本减半）
-- [ ] **风格要多样**：吐槽、提问、科普、转发评论、中英混杂、带错字和 emoji
-- [ ] 🔑 **命门：每个簇内必须刻意造出「词面零重叠但语义相同」的样本对。**
+- [x] 用 `claude-sonnet-5` 批量生成，走 **Batch API**（成本减半）
+- [x] **风格要多样**：吐槽、提问、科普、转发评论、中英混杂、带错字和 emoji
+- [x] 🔑 **命门：每个簇内必须刻意造出「词面零重叠但语义相同」的样本对。**
       这条不做到，后面所有对照数字都出不来：
   - 经验类："分布式锁怎么做" / "多实例抢同一把锁" / "Redisson 的 watchdog 续期"
   - 共鸣类："撑不下去了" / "每天睁眼就想请假" / "工位坐满八小时一句话没说"
-- [ ] 长度控制在 **60–200 字**——保住 Day 5「一条 post 一个向量」的设计。
+- [x] 长度控制在 **60–200 字**（已修订为校验口径 30–200，理由见 `CORPUS_DESIGN.md` §5.5）——保住 Day 5「一条 post 一个向量」的设计。
       长文本压成单向量会严重稀释语义，要救就得引入 chunk 表，那是表结构变更
 
 **Step 3 · 账号与关注关系**
 
-- [ ] 建 30–40 个测试用户承载语料。**别只建 3–5 个账号塞 3000 条**（作者集中度太高，时间线不真实）
+- [x] 建 30–40 个测试用户承载语料。**别只建 3–5 个账号塞 3000 条**（作者集中度太高，时间线不真实）
 - [ ] 可选：留 2–3 个媒体风格账号当点缀，让 demo 时间线有层次——但别当主体
-- [ ] ⚠️ **关注关系要控量**：`FeedWriteService#resolveFeedTargets` 对 `PUBLIC` 帖扇出给全部 follower。
+- [x] ⚠️ **关注关系要控量**：`FeedWriteService#resolveFeedTargets` 对 `PUBLIC` 帖扇出给全部 follower。
       每号给 30–80 个 follower 就够 demo；给 500 个的话 backfill 要写上百万条 ZSET
 
 **Step 4 · 导入**
@@ -339,17 +340,21 @@
 - [x] ⚠️ **退出不能用 `System.exit(0)`**：导入器是读写事务，在 `@Transactional` 方法内
       退出会在提交前杀掉 JVM。改由 `ToolsShutdownRunner`（`@Order(LOWEST_PRECEDENCE)`）
       在所有 Runner 跑完后关闭上下文。`FeedBackfillRunner` 能那么写是因为它是 readOnly
-- [ ] 时间戳打散在过去 6 个月内（否则时间排序的 baseline 会不真实）
-- [ ] `visibility = PUBLIC`
-- [ ] 每条 post 记录它属于哪一层（经验/共鸣/噪声）与哪个簇——**Day 8 分层标注、Day 9 分层报数都要用**
-- [ ] 导入后确认：`SELECT count(*) FROM posts WHERE deleted = false;` ≥ 3000
-- [ ] 跑一次 `FEED_BACKFILL` 把新帖灌进 feed（否则前端页面看不到）
+- [x] 时间戳打散在过去 6 个月内（否则时间排序的 baseline 会不真实）
+- [x] `visibility = PUBLIC`
+- [x] 每条 post 记录它属于哪一层（经验/共鸣/噪声）与哪个簇——**Day 8 分层标注、Day 9 分层报数都要用**
+- [x] 导入后确认：`SELECT count(*) FROM posts WHERE deleted = false;` ≥ 3000
+- [x] 跑一次 `FEED_BACKFILL` 把新帖灌进 feed（否则前端页面看不到）
 
 ### ✅ 验收标准
 - 语料 ≥ 3000 条，三层占比符合设计（`GROUP BY` 抽样看一眼）
 - 每个靶区簇内能人工找出至少 3 组「词面零重叠但语义相同」的帖子对
 - 随便搜一个共鸣类口语 query（如"撑不下去了"），现有 `LIKE` 搜索**几乎返回不了任何相关结果**
   （这就是你的 baseline 痛点，截图留证）
+
+> **实测（2026-10-08 核对数据库）**：`corpus_meta` 为经验 900（12 簇/48 族）/ 共鸣 1200（12 簇/48 族）/ 噪声 900；
+> 40 个 `corpus_u*` 账号、643 条关注；语料帖全部 PUBLIC，`created_at` 落在 2026-03-28 ~ 2026-09-24 且与 id 同向单调；
+> feed 已回灌。`LIKE '%撑不下去了%'` 在 3168 条帖子中**仅命中 1 条**。待补：前端截图留证。
 
 ### 💬 面试钩子
 > "我意识到 57 条数据上做检索评测是自欺欺人，所以先解决语料。但规模只是及格线——我真正花时间的是语料**形态**。
@@ -383,21 +388,23 @@
 
 ### 🛠 开发 checklist
 
-- [ ] 定义接口（**这个抽象是后面做选型对比的前提**）：
+- [x] 定义接口（**这个抽象是后面做选型对比的前提**）：
   ```java
   public interface EmbeddingClient {
-      float[] embed(String text);
-      List<float[]> embedBatch(List<String> texts);
+      float[] embedQuery(String text);                  // input_type = query
+      List<float[]> embedDocuments(List<String> texts); // input_type = document
       int dimensions();
       String modelId();     // 记录到库里，便于日后区分不同模型产出的向量
   }
   ```
-- [ ] 实现 `VoyageEmbeddingClient`：用 `RestClient`/`WebClient` 调 Voyage API
+  > 实际实现偏离了最初的 `embed` / `embedBatch` 签名：把 query/document 编码进方法名，
+  > 调用方就没有机会传错 `input_type`（传错不报错，只会静默掉点）。
+- [x] 实现 `VoyageEmbeddingClient`：用 `RestClient`/`WebClient` 调 Voyage API
       （具体模型名去 https://docs.voyageai.com 确认当前型号，别照抄博客里的旧名字）
-- [ ] 区分 `input_type`：文档入库用 `document`，查询用 `query`（很多模型对两者用不同的前缀，**搞混会显著掉点**）
-- [ ] 批量接口：一次提交多条，**带重试和退避**（限流是常态）
-- [ ] 把 API key 放进环境变量，**绝不写进 `application.yml`**
-- [ ] 写一个临时单测验证语义性质：
+- [x] 区分 `input_type`：文档入库用 `document`，查询用 `query`（很多模型对两者用不同的前缀，**搞混会显著掉点**）
+- [x] 批量接口：一次提交多条，**带重试和退避**（限流是常态）
+- [x] 把 API key 放进环境变量，**绝不写进 `application.yml`**
+- [x] 写一个临时单测验证语义性质：
   ```
   sim("怎么实现分布式锁", "Redisson 加锁的坑")     应该 > 
   sim("怎么实现分布式锁", "今天中午吃什么")
@@ -406,6 +413,35 @@
 
 ### ✅ 验收标准
 上面那个不等式成立。如果不成立，先查 `input_type` 和归一化，再怀疑模型。
+
+### 📝 实际执行记录（2026-10-08）
+
+**代码**（`backend/src/main/java/com/brayton/weibo/embedding/`）：
+
+| 设计点 | 做法 |
+|---|---|
+| 模型 | `voyage-4`，1024 维（与 bge-m3 同维，对照时可共用 `vector(1024)`） |
+| 调用 | `RestClient` 直调 `POST /v1/embeddings`，不引 SDK；`truncation=false`，超长报错而非静默截断 |
+| key | 只读环境变量 `VOYAGE_API_KEY`；缺 key 时应用照常启动，调用时才报错 |
+| 拆批 | 128 条/批（服务端上限 1000 条、32 万 token；单帖 ≤200 字，不做 token 估算） |
+| 顺序 | 响应按 `index` 排序后再返回，并校验条数与维度 |
+| 重试 | 仅 429 / 5xx / 网络错误；指数退避 1s→30s 封顶 × [0.5,1) 抖动，优先遵循 `Retry-After`；其余 4xx 立即失败 |
+
+**测试**：`VoyageEmbeddingClientTest`（7 个，MockRestServiceServer，离线）全部通过；
+`VoyageEmbeddingSmokeTest`（3 个，真实 API，无 key 自动跳过）全部通过：
+
+| query | 文档 | 余弦相似度 |
+|---|---|---|
+| 怎么实现分布式锁 | Redisson 加锁的坑 | **0.5334** |
+| 怎么实现分布式锁 | 今天中午吃什么 | 0.1315 |
+| 抑郁 | 今天情绪很低落，做什么都提不起劲 | **0.5902** |
+| 抑郁 | 感受不到快乐，一想到未来就好绝望 | **0.5871** |
+| 抑郁 | 今天中午吃什么 | 0.2749 |
+
+- 「抑郁」组与两条帖子**字面零重叠**，`LIKE` 一条都召回不了——共鸣类论点的第一个实证
+- 向量已单位归一化（模长 ≈ 1）→ 余弦相似度 == 内积，Day 5 可用 `vector_ip_ops` + `<#>`
+- ⚠️ **同一条无关文本的分数随 query 漂移**（0.13 → 0.27）：短 query 信息量少，整体分数被抬高。
+  **Day 14 的拒答不能用固定相似度阈值**，见该节
 
 ---
 
@@ -937,6 +973,10 @@ D: 0        + 1/(60+2) = 0.01613
   | 检索最高分低于阈值 | **不调用模型**，返回"站内没有相关讨论"（省钱且更可靠） | Day 8 标注集里的"无答案 query" |
   | 意图为**共鸣类** | 不生成，转成语义搜索结果列表展示 | Day 13 的意图分类器 |
   | 意图为**风险类**（自伤/自杀倾向） | 走干预文案，**既不生成也不返回检索结果** | Day 13 的意图分类器 |
+
+  > ⚠️ **阈值不能拍一个固定值**（Day 4 实测）：同一条无关文本对「分布式锁」得 0.13、对「抑郁」得 0.27，
+  > 绝对分数随 query 长度与信息量漂移。阈值须在 Day 8 标注集上校准，或改用相对判据
+  > （如 top-1 与 top-10 的分差、与 query 自身基线的比值），并在 EVAL.md 报告误拒/漏拒率。
 
 - [ ] ⚠️ **第三条是硬要求，不是加分项。** 共鸣类语料里本来就有"撑不下去了"这类表达，
       不做这层路由，你的系统会把一堆同样绝望的帖子推给一个正在崩溃的用户。

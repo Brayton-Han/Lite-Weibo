@@ -43,6 +43,14 @@ r2:
   bucket: "weibo-images"
   publicBaseUrl: "https://CHANGE_ME.r2.dev"
 
+# 向量化（可选，以下均为默认值）。API key 只走环境变量 VOYAGE_API_KEY，不要写在这里。
+# embedding:
+#   voyage:
+#     model: voyage-4
+#     dimensions: 1024      # 必须与数据库 vector(N) 一致
+#     batch-size: 128
+#     max-attempts: 5
+
 # ─────────────────────────────────────────────────────────────
 # 用法：cp application.yml.example application.yml，填入真实值。
 #
