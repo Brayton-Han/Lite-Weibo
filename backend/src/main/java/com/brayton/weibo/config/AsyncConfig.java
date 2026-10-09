@@ -48,6 +48,37 @@ public class AsyncConfig implements AsyncConfigurer {
         return executor;
     }
 
+    /** 增量向量化的线程池 bean 名 */
+    public static final String EMBEDDING_EXECUTOR = "embeddingTaskExecutor";
+
+    /**
+     * 与 feed 线程池分开：一次 embedding 调用遇到 429 会按分钟窗口退避，单个任务可能阻塞一分钟以上，
+     * 共用线程池会把扇出饿死。
+     *
+     * 拒绝策略与 feed 相反，选择丢弃而非 CallerRuns：在请求线程里同步调第三方 API，
+     * 限流时发帖接口会卡几十秒；而漏掉的向量可以由回填补齐，不会造成数据不一致。
+     * 线程数取小值，因为瓶颈在服务端的 RPM 限额，多开线程只会更快撞上 429。
+     */
+    @Bean(EMBEDDING_EXECUTOR)
+    public ThreadPoolTaskExecutor embeddingTaskExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(2);
+        executor.setMaxPoolSize(2);
+        executor.setQueueCapacity(1000);
+        executor.setThreadNamePrefix("embedding-async-");
+
+        executor.setRejectedExecutionHandler((task, pool) ->
+                log.warn("向量化队列已满（{}），丢弃一个任务，可由 EmbeddingBackfillRunner 补齐",
+                        pool.getQueue().size()));
+
+        // 退避中的任务可能要等很久，不为它拖慢停机；没跑完的同样由回填补齐
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(10);
+
+        executor.initialize();
+        return executor;
+    }
+
     /**
      * void 返回的 @Async 方法抛出的异常不会传播给调用方，没有这个处理器就是彻底静默。
      */

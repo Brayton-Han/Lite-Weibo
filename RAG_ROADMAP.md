@@ -574,10 +574,14 @@
 
 ### 🛠 开发 checklist
 
-- [ ] 新建 `EmbeddingWriteService`（**独立 Bean**，不要写在 `PostService` 里——类内自调用会让 `@Async` 失效）
-- [ ] `@Async` 方法签名**只接收原始值**（`postId`、`content`、`refPostContent`），
+- [x] 新建 `EmbeddingWriteService`（**独立 Bean**，不要写在 `PostService` 里——类内自调用会让 `@Async` 失效）
+- [x] `@Async` 方法签名**只接收原始值**（`postId`、`content`、`refPostContent`），
       不接收 `Post` 实体（跨线程后持久化上下文已失效，取 LAZY 关联会抛 `LazyInitializationException`）
-- [ ] 在 `PostService.createPost` 提交后触发向量化
+      - 实际只传 `postId`（`PostEmbeddingEvent`），执行时回库重读正文与原帖：排队期间帖子可能被删或改为非公开，
+        重读能自然跳过；且与回填共用同一条选取 SQL 和 `PostChunker`，存量与增量的 chunk_text 不会漂移
+      - 独立线程池 `embeddingTaskExecutor`（2 线程、队列 1000、满了丢弃）：429 退避单任务可阻塞一分钟以上，
+        共用 feed 池会饿死扇出；不用 CallerRuns 是因为不能让发帖请求同步等第三方 API，漏掉的由回填补齐
+- [x] 在 `PostService.createPost` 提交后触发向量化（`AFTER_COMMIT`，仅 PUBLIC 帖）
 - [ ] 编辑帖子（`isEdited`）时重新向量化
 - [ ] **长文切片**（Day 5 回填时暂按一帖一 chunk，`chunk_index` 恒为 0）：
   - 抽一个 `PostChunker`，供 `EmbeddingBackfillRunner` 与 `EmbeddingWriteService` **共用**，
@@ -594,6 +598,13 @@
 - [ ] **决定并记录**：走显式删除还是读时过滤？
       （建议读时过滤 + 定期清理，与项目现有的 `liked:` ZSet 自愈思路一致）
 - [ ] 失败可观测：`AsyncUncaughtExceptionHandler` 记录 + 一个能查"哪些帖子没有向量"的 SQL
+  - 增量路径对 `EmbeddingException` 只打一行 WARN、不重试；补齐就是重跑 `EmbeddingBackfillRunner`。查漏：
+    ```sql
+    SELECT p.id, p.created_at FROM posts p
+    WHERE p.deleted = false AND p.visibility = 0 AND btrim(p.content) <> ''
+      AND NOT EXISTS (SELECT 1 FROM post_embeddings e
+                      WHERE e.post_id = p.id AND e.model_id = 'voyage/voyage-4');
+    ```
 - [ ] 新建端点 `GET /posts/search/semantic?q=...`（纯向量，临时用于 Phase 2 打分）
 
 ### ✅ 验收标准

@@ -1,6 +1,9 @@
 package com.brayton.weibo.tools;
 
 import com.brayton.weibo.embedding.EmbeddingClient;
+import com.brayton.weibo.embedding.PostChunker;
+import com.brayton.weibo.repository.PostEmbeddingRepository;
+import com.brayton.weibo.repository.PostEmbeddingRepository.Chunk;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Profile;
@@ -28,16 +31,10 @@ import java.util.Optional;
  * 站内搜索本就只返回 PUBLIC 帖子；仅好友/私密内容没有理由发给第三方 embedding 服务。
  * 帖子改可见性后的向量增删属于 Day 6 的生命周期处理。
  *
- * <h3>chunk_text 怎么拼</h3>
- * 一帖一个 chunk（chunk_index = 0）：
- * <ul>
- *   <li>原创帖：正文</li>
- *   <li>转发并评论：评论 + 原帖正文。「转发并评论」的语义由两段共同构成，只 embed 评论
- *       （常常是「好烦啊」这类短句）会丢掉上下文</li>
- *   <li>纯转发（自身正文为空）：跳过。它的内容就是原帖，原帖已有向量，再 embed 一份
- *       只会让同一段文字在检索结果里出现两次</li>
- * </ul>
- * 原帖已删除或非 PUBLIC 时，只用评论本身，不把它的内容带出去。
+ * <h3>与增量向量化的关系</h3>
+ * 新帖由 EmbeddingWriteService 在发帖后实时向量化，两者共用 {@link PostChunker} 的拼接规则
+ * 与 {@link PostEmbeddingRepository} 的写入。增量路径失败只记日志、不重试，
+ * 漏掉的帖子再跑一次本工具即可补齐。
  */
 @Component
 @Profile("tools")
@@ -51,7 +48,7 @@ public class EmbeddingBackfillRunner implements CommandLineRunner {
     /** 与 VoyageEmbeddingClient 的内部拆批一致，一批恰好对应一次 API 调用。 */
     private static final int BATCH_SIZE = 128;
 
-    private static final int VISIBILITY_PUBLIC = 0;   // PostVisibility.PUBLIC（ORDINAL）
+    private static final int VISIBILITY_PUBLIC = PostEmbeddingRepository.VISIBILITY_PUBLIC;
 
     private static final String SELECT_PENDING = """
             SELECT p.id, p.content, r.content AS ref_content
@@ -67,14 +64,9 @@ public class EmbeddingBackfillRunner implements CommandLineRunner {
             LIMIT ?
             """;
 
-    private static final String INSERT = """
-            INSERT INTO post_embeddings (post_id, chunk_index, chunk_text, embedding, model_id)
-            VALUES (?, 0, ?, ?::vector, ?)
-            ON CONFLICT (post_id, chunk_index, model_id) DO NOTHING
-            """;
-
     private final JdbcTemplate jdbc;
     private final EmbeddingClient embeddingClient;
+    private final PostEmbeddingRepository embeddingRepository;
 
     @Override
     public void run(String... args) {
@@ -119,7 +111,7 @@ public class EmbeddingBackfillRunner implements CommandLineRunner {
             List<Long> ids = new ArrayList<>();
             List<String> texts = new ArrayList<>();
             for (Pending p : batch) {
-                String text = chunkText(p);
+                String text = PostChunker.chunkText(p.content(), p.refContent());
                 if (text == null) {
                     skipped++;
                     continue;
@@ -140,12 +132,12 @@ public class EmbeddingBackfillRunner implements CommandLineRunner {
                 throw e;
             }
 
-            List<Object[]> rows = new ArrayList<>(ids.size());
+            List<Chunk> chunks = new ArrayList<>(ids.size());
             for (int i = 0; i < ids.size(); i++) {
-                rows.add(new Object[]{ids.get(i), texts.get(i), toPgVector(vectors.get(i)), modelId});
+                chunks.add(new Chunk(ids.get(i), texts.get(i), vectors.get(i)));
             }
-            jdbc.batchUpdate(INSERT, rows);
-            written += rows.size();
+            embeddingRepository.insertAll(chunks, modelId);
+            written += chunks.size();
 
             System.out.printf("  ✓ %,5d / %,d  (至 post_id=%d, %.1fs)%n",
                     written, pending, lastId, (System.currentTimeMillis() - t0) / 1000.0);
@@ -171,28 +163,6 @@ public class EmbeddingBackfillRunner implements CommandLineRunner {
                     + ")，而 " + embeddingClient.modelId() + " 配置为 " + embeddingClient.dimensions()
                     + "。改 embedding.voyage.dimensions，或新写迁移修改列类型并重建 HNSW 索引");
         }
-    }
-
-    /** 返回 null 表示该帖不需要向量（纯转发）。 */
-    static String chunkText(Pending p) {
-        String own = p.content() == null ? "" : p.content().strip();
-        if (own.isEmpty()) {
-            return null;
-        }
-        String ref = p.refContent() == null ? "" : p.refContent().strip();
-        return ref.isEmpty() ? own : own + "\n\n[转发原文] " + ref;
-    }
-
-    /** pgvector 的文本格式 [x1,x2,...]；SQL 侧用 ?::vector 转换，免引 pgvector-java 依赖。 */
-    static String toPgVector(float[] v) {
-        StringBuilder sb = new StringBuilder(v.length * 12).append('[');
-        for (int i = 0; i < v.length; i++) {
-            if (i > 0) {
-                sb.append(',');
-            }
-            sb.append(v[i]);   // Float.toString 可能输出 1.0E-5 这样的科学计数法，pgvector 能解析
-        }
-        return sb.append(']').toString();
     }
 
     record Pending(long id, String content, String refContent) {}

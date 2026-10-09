@@ -12,6 +12,7 @@ import com.brayton.weibo.enums.PostVisibility;
 import com.brayton.weibo.error.CommonErrorCode;
 import com.brayton.weibo.error.WeiboException;
 import com.brayton.weibo.event.LikeEvent;
+import com.brayton.weibo.event.PostEmbeddingEvent;
 import com.brayton.weibo.event.PostFanOutEvent;
 import com.brayton.weibo.repository.*;
 import com.brayton.weibo.webSocket.WebSocketPusher;
@@ -432,6 +433,12 @@ public class PostService {
         // fan-out：事务提交后由 FeedWriteService#onPostFanOut 异步执行
         publisher.publishEvent(new PostFanOutEvent(
                 saved.getId(), userId, saved.getVisibility(), TimeUtil.toTs(saved.getCreatedAt())));
+
+        // 向量化：同样在提交后异步执行（EmbeddingWriteService）。只有 PUBLIC 帖子会被搜索到，
+        // 其余可见性的内容也没有理由发给第三方 embedding 服务
+        if (saved.getVisibility() == PostVisibility.PUBLIC) {
+            publisher.publishEvent(new PostEmbeddingEvent(saved.getId()));
+        }
 
         return buildPostResponse(saved, userId, true, true, false); // 返回新帖详情
     }

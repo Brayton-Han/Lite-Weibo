@@ -46,6 +46,8 @@ services:
       SPRING_DATA_REDIS_PORT: 6379
       SPRING_RABBITMQ_HOST: rabbitmq_weibo
       SPRING_RABBITMQ_PORT: 5672
+      # 新帖增量向量化用；从宿主机环境透传，不写进文件。未设置时发帖照常，只是不生成向量
+      VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
 
   frontend:
     build: ./frontend
