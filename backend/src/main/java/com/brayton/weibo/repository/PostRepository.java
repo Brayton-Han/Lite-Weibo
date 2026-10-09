@@ -42,6 +42,7 @@ public interface PostRepository extends JpaRepository<Post, Long> {
     SELECT *
     FROM posts
     WHERE id < :lastId and visibility in :visibilities and search_vector @@ plainto_tsquery('simple', :query)
+      and deleted = false   -- 原生 SQL 不受实体上 @Where 的软删除过滤约束，必须手写
     ORDER BY created_at DESC
     """, nativeQuery = true)
     List<Post> searchPosts(
