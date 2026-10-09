@@ -33,7 +33,7 @@ import java.util.concurrent.ThreadLocalRandom;
  *
  * <h3>重试</h3>
  * 只重试 429、5xx 与网络错误；其余 4xx（key 错、参数错）重试也不会好，立即失败。
- * 退避为指数 + 抖动，服务端给了 Retry-After 时以它为准。
+ * 服务端给了 Retry-After 时以它为准；否则 429 按分钟窗口退避（≥20s），5xx 与网络错误按秒级指数退避。
  */
 @Slf4j
 @Component
@@ -135,12 +135,12 @@ public class VoyageEmbeddingClient implements EmbeddingClient {
                     throw new EmbeddingException("Voyage 请求失败 HTTP " + status + "（第 " + attempt
                             + " 次）：" + e.getResponseBodyAsString(), e);
                 }
-                backoff(attempt, retryAfterMillis(e.getResponseHeaders()), "HTTP " + status);
+                backoff(attempt, retryAfterMillis(e.getResponseHeaders()), status == 429, "HTTP " + status);
             } catch (ResourceAccessException e) {
                 if (attempt >= maxAttempts) {
                     throw new EmbeddingException("Voyage 网络错误，重试 " + attempt + " 次后放弃", e);
                 }
-                backoff(attempt, -1, e.getClass().getSimpleName());
+                backoff(attempt, -1, false, e.getClass().getSimpleName());
             }
         }
     }
@@ -171,12 +171,21 @@ public class VoyageEmbeddingClient implements EmbeddingClient {
 
     // ---------------------------------------------------------------- 退避
 
-    private void backoff(int attempt, long retryAfterMillis, String reason) {
-        // 1s, 2s, 4s, 8s ... 封顶 30s，再乘 [0.5, 1.0) 的抖动，避免多个批次同时重试撞在一起
-        long exp = Math.min(30_000L, 1_000L << (attempt - 1));
-        long wait = retryAfterMillis > 0
-                ? retryAfterMillis
-                : (long) (exp * (0.5 + ThreadLocalRandom.current().nextDouble() * 0.5));
+    private void backoff(int attempt, long retryAfterMillis, boolean rateLimited, String reason) {
+        long wait;
+        if (retryAfterMillis > 0) {
+            wait = retryAfterMillis;
+        } else if (rateLimited) {
+            // Voyage 按「每分钟」计 RPM/TPM。秒级退避始终落在同一个分钟窗口里，必然连续 429
+            // （实测：免费层 1→2→4→8s 重试全部失败）。所以从 20s 起步、封顶 60s，
+            // 抖动只往上加 [1.0, 1.5)，保证不会短于基准值
+            long base = Math.min(60_000L, 20_000L << (attempt - 1));
+            wait = (long) (base * (1.0 + ThreadLocalRandom.current().nextDouble() * 0.5));
+        } else {
+            // 5xx / 网络抖动是瞬时故障：1s, 2s, 4s, 8s ... 封顶 30s，乘 [0.5, 1.0) 的抖动错开并发重试
+            long exp = Math.min(30_000L, 1_000L << (attempt - 1));
+            wait = (long) (exp * (0.5 + ThreadLocalRandom.current().nextDouble() * 0.5));
+        }
         log.warn("Voyage {}，{} ms 后第 {} 次重试", reason, wait, attempt + 1);
         try {
             sleeper.sleep(wait);

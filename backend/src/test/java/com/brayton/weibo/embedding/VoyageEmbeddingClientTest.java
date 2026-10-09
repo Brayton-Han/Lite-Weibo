@@ -91,6 +91,20 @@ class VoyageEmbeddingClientTest {
     }
 
     @Test
+    void rateLimitWithoutRetryAfterWaitsPastTheMinuteWindow() {
+        server.expect(requestTo(URL)).andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS));
+        server.expect(requestTo(URL)).andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS));
+        server.expect(requestTo(URL)).andRespond(withSuccess(response(0), MediaType.APPLICATION_JSON));
+
+        client.embedQuery("q");
+
+        assertThat(sleeps).hasSize(2);
+        assertThat(sleeps.get(0)).isBetween(20_000L, 30_000L);     // 20s × [1.0, 1.5)
+        assertThat(sleeps.get(1)).isBetween(40_000L, 60_000L);     // 40s × [1.0, 1.5)
+        server.verify();
+    }
+
+    @Test
     void givesUpAfterMaxAttempts() {
         for (int i = 0; i < 3; i++) {
             server.expect(requestTo(URL)).andRespond(withStatus(HttpStatus.BAD_GATEWAY));
