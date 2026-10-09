@@ -1,0 +1,9 @@
+# tools profile：一次性离线工具（语料导入等）。
+#
+# ⚠️ 这里曾经设过 spring.main.web-application-type: none 让应用跑完自然退出，
+#    但本项目起不来——Spring Security 的 WebSecurityConfiguration 依赖
+#    CorsConfigurationSource，而该 Bean 只在 Web 上下文中存在。
+#    改由 ToolsShutdownRunner 在所有 CommandLineRunner 执行完毕后关闭上下文。
+spring:
+  jpa:
+    show-sql: false        # 导入 3000 条时 SQL 日志会淹没工具自己的输出

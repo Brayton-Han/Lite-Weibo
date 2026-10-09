@@ -1,1 +1,10 @@
 .idea/
+__pycache__/
+.venv/
+
+# RAG 评测语料的产出与原始数据。
+# corpus/ 含 LWC 派生文本与个人语感锚点样本；LWC-messages/ 是 2.3GB 原始语料。
+# 两者都受 CC BY-NC-SA 3.0 约束——SA 条款会让派生物进入公开仓库时被卷入同一许可。
+# 重建方式见 tools/corpus_gen/README.md。
+corpus/
+LWC-messages/
