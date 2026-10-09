@@ -2,6 +2,7 @@ package com.brayton.weibo.repository;
 
 import com.brayton.weibo.embedding.PostChunker;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
@@ -41,6 +42,32 @@ public class PostEmbeddingRepository {
             WHERE post_id = ? AND chunk_index = 0 AND model_id = ?
             """;
 
+    /**
+     * 纯向量检索。几处取舍：
+     * <ul>
+     *   <li>读时过滤：JOIN posts 写 deleted = false 与 visibility = PUBLIC。异步删向量有约 0.3s 的窗口，
+     *       失败时还会残留，这里保证它们不会被返回</li>
+     *   <li>ORDER BY 必须直接写 {@code embedding <=> 查询向量}，HNSW 索引才会被用上；相似度在外层再算</li>
+     *   <li>按 post_id 去重、取各 chunk 的最高分：将来长帖切成多个 chunk 时，不让一条帖子挤占多个名额。
+     *       内层多取 {@link #CHUNK_OVERSAMPLE} 倍给去重留余量</li>
+     * </ul>
+     */
+    private static final String SEARCH = """
+            SELECT post_id, max(sim) AS score FROM (
+                SELECT e.post_id, 1 - (e.embedding <=> ?::vector) AS sim
+                FROM post_embeddings e
+                JOIN posts p ON p.id = e.post_id
+                WHERE e.model_id = ? AND p.deleted = false AND p.visibility = ?
+                ORDER BY e.embedding <=> ?::vector
+                LIMIT ?
+            ) t
+            GROUP BY post_id
+            ORDER BY score DESC
+            LIMIT ?
+            """;
+
+    static final int CHUNK_OVERSAMPLE = 3;
+
     private static final String INSERT = """
             INSERT INTO post_embeddings (post_id, chunk_index, chunk_text, embedding, model_id)
             VALUES (?, 0, ?, ?::vector, ?)
@@ -48,6 +75,10 @@ public class PostEmbeddingRepository {
             """;
 
     private final JdbcTemplate jdbc;
+
+    /** HNSW 查询时的候选队列大小（pgvector 默认 40）：越大召回越高、越慢。Phase 3 会扫 {40, 100, 200}。 */
+    @Value("${embedding.search.ef-search:100}")
+    private int efSearch;
 
     /**
      * 按当前库里的状态算出该帖的 chunk_text。
@@ -113,6 +144,22 @@ public class PostEmbeddingRepository {
         jdbc.queryForList("SELECT id FROM posts WHERE id = ? FOR UPDATE", Long.class, postId);
     }
 
+    /**
+     * 按余弦相似度取最相近的 k 条帖子（已去重、已过滤非公开与已删除），分数降序。
+     *
+     * SET LOCAL 只在当前事务内生效，所以要包事务——否则参数会留在连接池里的这条连接上，污染后续查询。
+     * iterative_scan（pgvector 0.8+）：HNSW 先取出 ef_search 个候选再执行 WHERE，过滤掉的多了结果会不足 k 条；
+     * 开启后索引会继续往下扫直到凑够。relaxed_order 允许结果略微乱序，外层按分数重排，不受影响。
+     */
+    @Transactional(readOnly = true)
+    public List<Hit> searchNearest(float[] query, String modelId, int k) {
+        jdbc.queryForObject("SELECT set_config('hnsw.ef_search', ?, true)", String.class, String.valueOf(efSearch));
+        jdbc.queryForObject("SELECT set_config('hnsw.iterative_scan', 'relaxed_order', true)", String.class);
+        String vec = toPgVector(query);
+        return jdbc.query(SEARCH, (rs, i) -> new Hit(rs.getLong("post_id"), rs.getDouble("score")),
+                vec, modelId, VISIBILITY_PUBLIC, vec, k * CHUNK_OVERSAMPLE, k);
+    }
+
     /** 批量写入；已存在的 (post_id, chunk_index, model_id) 跳过，重跑与并发写都安全。 */
     public void insertAll(List<Chunk> chunks, String modelId) {
         List<Object[]> rows = new ArrayList<>(chunks.size());
@@ -135,4 +182,7 @@ public class PostEmbeddingRepository {
     }
 
     public record Chunk(long postId, String text, float[] vector) {}
+
+    /** score 为余弦相似度，1 为完全相同。 */
+    public record Hit(long postId, double score) {}
 }

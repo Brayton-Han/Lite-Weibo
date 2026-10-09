@@ -626,7 +626,18 @@
     去掉 `EMBEDDING_BACKFILL_DRY_RUN` 即修复（先校正残留 / 过期，再补缺）
   - 首跑（2026-10-09）：缺失 1 条（6181，自动向量化上线前发布）、残留 0、过期 0
   - 未做：指标与告警（项目没有 actuator / micrometer），发现问题仍要人去跑体检
-- [ ] 新建端点 `GET /posts/search/semantic?q=...`（纯向量，临时用于 Phase 2 打分）
+- [x] 新建端点 `GET /posts/search/semantic?q=...`（纯向量，临时用于 Phase 2 打分）
+  - `?q=`（去首尾空白后 1–200 字）`&k=`（默认 10，夹到 1–50），返回 `[{post, score}]`，score 为余弦相似度；
+    只给 top-k 不分页——ANN 结果没有稳定游标，翻页留到 Phase 3 混合检索定型后按分数做 keyset
+  - **读时过滤**落在检索 SQL：`JOIN posts` + `deleted = false AND visibility = 0`；加载实体后再判一次可见性，
+    覆盖检索与加载之间刚被删 / 改为非公开的帖子
+  - 按 `post_id` 去重取最高分，内层多取 3 倍给去重留余量（当前一帖一 chunk，为长文切片预留）
+  - `hnsw.ef_search` 默认 100（`embedding.search.ef-search` 可配），并开 `hnsw.iterative_scan = relaxed_order`
+    （pgvector 0.8.6）：过滤在 ANN 取候选之后执行，不开时结果可能不足 k 条。两者都用 `set_config(..., true)`
+    限定在只读事务内，提交后恢复默认，不污染连接池里的连接（已在库上验证）
+  - EXPLAIN（ef_search=100，k=10）：走 `idx_post_embeddings_hnsw` + `posts_pkey` 嵌套循环，3155 条向量约 13ms
+  - **查询向量化快速失败**：入库路径的 429 按分钟窗口退避 20–60s，放在用户请求里会挂几分钟。
+    `embedQuery` 不重试 429，5xx / 网络错误最多 2 次；失败返回业务码 1801，用户自行重试
 
 ### ✅ 验收标准
 发一条新帖 → 几秒后能被语义搜索命中；删一条帖 → 不再出现在结果里。

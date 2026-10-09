@@ -34,10 +34,17 @@ import java.util.concurrent.ThreadLocalRandom;
  * <h3>重试</h3>
  * 只重试 429、5xx 与网络错误；其余 4xx（key 错、参数错）重试也不会好，立即失败。
  * 服务端给了 Retry-After 时以它为准；否则 429 按分钟窗口退避（≥20s），5xx 与网络错误按秒级指数退避。
+ *
+ * <h3>查询走快速失败</h3>
+ * 上面的退避是为后台入库设计的：任务在线程池里等一分钟无所谓。{@link #embedQuery} 跑在用户的搜索请求里，
+ * 限流时等 20–60s 再重试、最多数次，请求就会挂好几分钟。所以查询不重试 429（同一分钟窗口内重试必然再撞），
+ * 5xx / 网络错误最多 {@value #QUERY_MAX_ATTEMPTS} 次，失败尽快交还调用方，让用户自己重试。
  */
 @Slf4j
 @Component
 public class VoyageEmbeddingClient implements EmbeddingClient {
+
+    static final int QUERY_MAX_ATTEMPTS = 2;
 
     private final RestClient http;
     private final String apiKey;
@@ -77,14 +84,15 @@ public class VoyageEmbeddingClient implements EmbeddingClient {
 
     @Override
     public float[] embedQuery(String text) {
-        return embed(List.of(text), "query").get(0);
+        return embed(List.of(text), "query", Math.min(QUERY_MAX_ATTEMPTS, maxAttempts), false).get(0);
     }
 
     @Override
     public List<float[]> embedDocuments(List<String> texts) {
         List<float[]> out = new ArrayList<>(texts.size());
         for (int from = 0; from < texts.size(); from += batchSize) {
-            out.addAll(embed(texts.subList(from, Math.min(from + batchSize, texts.size())), "document"));
+            out.addAll(embed(texts.subList(from, Math.min(from + batchSize, texts.size())), "document",
+                    maxAttempts, true));
         }
         return out;
     }
@@ -101,7 +109,7 @@ public class VoyageEmbeddingClient implements EmbeddingClient {
 
     // ---------------------------------------------------------------- 单批请求
 
-    private List<float[]> embed(List<String> batch, String inputType) {
+    private List<float[]> embed(List<String> batch, String inputType, int attempts, boolean retryRateLimit) {
         if (apiKey == null || apiKey.isBlank()) {
             throw new EmbeddingException("未设置环境变量 VOYAGE_API_KEY");
         }
@@ -114,11 +122,11 @@ public class VoyageEmbeddingClient implements EmbeddingClient {
 
         // truncation=false：超长输入宁可报错也不静默截断，否则向量只代表前半段且无人知道
         EmbedRequest req = new EmbedRequest(batch, model, inputType, dimensions, false);
-        EmbedResponse resp = callWithRetry(req);
+        EmbedResponse resp = callWithRetry(req, attempts, retryRateLimit);
         return toVectors(resp, batch.size());
     }
 
-    private EmbedResponse callWithRetry(EmbedRequest req) {
+    private EmbedResponse callWithRetry(EmbedRequest req, int maxAttempts, boolean retryRateLimit) {
         for (int attempt = 1; ; attempt++) {
             try {
                 return http.post()
@@ -130,7 +138,7 @@ public class VoyageEmbeddingClient implements EmbeddingClient {
                         .body(EmbedResponse.class);
             } catch (RestClientResponseException e) {
                 int status = e.getStatusCode().value();
-                boolean retryable = status == 429 || status >= 500;
+                boolean retryable = (status == 429 && retryRateLimit) || status >= 500;
                 if (!retryable || attempt >= maxAttempts) {
                     throw new EmbeddingException("Voyage 请求失败 HTTP " + status + "（第 " + attempt
                             + " 次）：" + e.getResponseBodyAsString(), e);

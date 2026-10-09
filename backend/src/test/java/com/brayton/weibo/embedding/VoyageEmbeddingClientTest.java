@@ -82,7 +82,7 @@ class VoyageEmbeddingClientTest {
         server.expect(requestTo(URL)).andRespond(withStatus(HttpStatus.SERVICE_UNAVAILABLE));
         server.expect(requestTo(URL)).andRespond(withSuccess(response(0), MediaType.APPLICATION_JSON));
 
-        client.embedQuery("q");
+        client.embedDocuments(List.of("q"));
 
         assertThat(sleeps).hasSize(2);
         assertThat(sleeps.get(0)).isEqualTo(7_000L);               // 以 Retry-After 为准
@@ -96,7 +96,7 @@ class VoyageEmbeddingClientTest {
         server.expect(requestTo(URL)).andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS));
         server.expect(requestTo(URL)).andRespond(withSuccess(response(0), MediaType.APPLICATION_JSON));
 
-        client.embedQuery("q");
+        client.embedDocuments(List.of("q"));
 
         assertThat(sleeps).hasSize(2);
         assertThat(sleeps.get(0)).isBetween(20_000L, 30_000L);     // 20s × [1.0, 1.5)
@@ -105,11 +105,32 @@ class VoyageEmbeddingClientTest {
     }
 
     @Test
+    void queryFailsFastOnRateLimit() {
+        // 查询跑在用户请求里：429 不重试、不睡，立即失败
+        server.expect(requestTo(URL)).andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS));
+
+        assertThatThrownBy(() -> client.embedQuery("q")).isInstanceOf(EmbeddingException.class)
+                .hasMessageContaining("429");
+        assertThat(sleeps).isEmpty();
+        server.verify();
+    }
+
+    @Test
+    void queryRetriesServerErrorOnlyOnce() {
+        server.expect(requestTo(URL)).andRespond(withStatus(HttpStatus.BAD_GATEWAY));
+        server.expect(requestTo(URL)).andRespond(withStatus(HttpStatus.BAD_GATEWAY));
+
+        assertThatThrownBy(() -> client.embedQuery("q")).isInstanceOf(EmbeddingException.class);
+        assertThat(sleeps).hasSize(1);
+        server.verify();
+    }
+
+    @Test
     void givesUpAfterMaxAttempts() {
         for (int i = 0; i < 3; i++) {
             server.expect(requestTo(URL)).andRespond(withStatus(HttpStatus.BAD_GATEWAY));
         }
-        assertThatThrownBy(() -> client.embedQuery("q"))
+        assertThatThrownBy(() -> client.embedDocuments(List.of("q")))
                 .isInstanceOf(EmbeddingException.class).hasMessageContaining("502");
         server.verify();
     }

@@ -49,7 +49,9 @@ r2:
 #     model: voyage-4
 #     dimensions: 1024      # 必须与数据库 vector(N) 一致
 #     batch-size: 128
-#     max-attempts: 5
+#     max-attempts: 5       # 后台入库；搜索时的查询向量化固定快速失败（429 不重试）
+#   search:
+#     ef-search: 100        # HNSW 查询候选队列，越大召回越高、越慢（pgvector 默认 40）
 
 # ─────────────────────────────────────────────────────────────
 # 用法：cp application.yml.example application.yml，填入真实值。

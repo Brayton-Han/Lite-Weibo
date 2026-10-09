@@ -23,6 +23,9 @@ public enum CommonErrorCode implements ErrorCode {
 
     LIKE_NOT_FOUND(1700, "like record not found"),
 
+    SEARCH_QUERY_INVALID(1800, "search query must be 1-200 characters"),
+    SEMANTIC_SEARCH_UNAVAILABLE(1801, "semantic search is temporarily unavailable, please retry"),
+
     TOKEN_EXPIRED(2001, "Token expired"),
 
     VALIDATION_FAILED(4001, "validation failed"),

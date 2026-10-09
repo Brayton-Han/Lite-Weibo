@@ -106,4 +106,14 @@ public class PostController {
         List<PostResponse> posts = postService.getSearchResults(q, lastId, size, self.getId());
         return ResponseEntity.ok(ApiResponse.success(posts));
     }
+
+    @GetMapping("/posts/search/semantic")
+    public ResponseEntity<ApiResponse<?>> getSemanticSearchPosts(
+            @RequestParam String q,
+            @RequestParam(defaultValue = "10") int k,
+            @AuthenticationPrincipal CustomUserDetails self
+    ) {
+        List<ScoredPostResponse> posts = postService.getSemanticSearchResults(q, k, self.getId());
+        return ResponseEntity.ok(ApiResponse.success(posts));
+    }
 }
