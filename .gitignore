@@ -8,3 +8,6 @@ __pycache__/
 # 重建方式见 tools/corpus_gen/README.md。
 corpus/
 LWC-messages/
+
+# 个人面试准备笔记，只留本地
+docs/PROJECT_ANALYSIS.*
