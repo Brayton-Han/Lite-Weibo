@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""噪声层 LLM 复筛（CORPUS_DESIGN.md §5「硬约束一」的第二道关）。
+"""噪声层 LLM 复筛（docs/CORPUS_DESIGN.md §5「硬约束一」的第二道关）。
 
 为什么需要这一道：`extract_noise.py` 的关键词过滤挡不住语义近似。实测漏网样本——
 
@@ -201,7 +201,7 @@ def main():
     print(f"剔除样本留档 {REJECTED.relative_to(ROOT)}（抽检 LLM 判得对不对）")
     if len(final) < args.target:
         print(f"⚠️ 只有 {len(final)} 条，不足 {args.target}。扩大候选池后重跑")
-    print("\n下一步：人工抽检 50 条（CORPUS_DESIGN.md §5），然后 Step 4 导入")
+    print("\n下一步：人工抽检 50 条（docs/CORPUS_DESIGN.md §5），然后 Step 4 导入")
 
 
 if __name__ == "__main__":

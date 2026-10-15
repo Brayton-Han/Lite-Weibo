@@ -8,7 +8,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * 检索评测指标（单 query 粒度），见 RAG_ROADMAP.md Day 7。
+ * 检索评测指标（单 query 粒度），见 docs/RAG_ROADMAP.md Day 7。
  * <p>
  * 约定：
  * <ul>

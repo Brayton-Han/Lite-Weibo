@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""靶区语料合成器（CORPUS_DESIGN.md Step 2）。
+"""靶区语料合成器（docs/CORPUS_DESIGN.md Step 2）。
 
 走 Message Batches API（成本减半）。**一个族一个请求**——让模型一次看到该族的
 全部 ~20 条，才能主动错开用词；逐条生成做不到这一点，只会产出高度雷同的句子。

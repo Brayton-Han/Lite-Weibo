@@ -1,13 +1,13 @@
 # 靶区语料合成器
 
-CORPUS_DESIGN.md **Step 2** 的实现：生成 2100 条靶区语料（经验类 900 + 共鸣类 1200）。
-噪声层 900 条不走这里，来自 Leiden Weibo Corpus（见 CORPUS_DESIGN.md §5）。
+docs/CORPUS_DESIGN.md **Step 2** 的实现：生成 2100 条靶区语料（经验类 900 + 共鸣类 1200）。
+噪声层 900 条不走这里，来自 Leiden Weibo Corpus（见 docs/CORPUS_DESIGN.md §5）。
 
 ## 文件
 
 | 文件 | 作用 |
 |---|---|
-| `clusters.py` | 24 簇 × 4 族的定义，是 CORPUS_DESIGN.md §3/§4 的可执行副本 |
+| `clusters.py` | 24 簇 × 4 族的定义，是 docs/CORPUS_DESIGN.md §3/§4 的可执行副本 |
 | `generate.py` | Batch API 提交 / 轮询 / 落地 `corpus/manifest.jsonl` |
 | `validate.py` | 长度、族内词面重叠、近重复的机械校验 |
 
@@ -62,7 +62,7 @@ python generate.py submit --style-samples my_posts.txt   # 带语感锚点
 走官方数据导出或手动复制，不要写爬虫抓自己的主页。转发的内容不是你的原创，先剔掉。
 
 输出落在仓库根的 `corpus/`，该目录已在 `.gitignore` 中——LWC 是
-**CC BY-NC-SA**，派生文本进了公开仓库会被卷入同一许可（CORPUS_DESIGN.md §5）。
+**CC BY-NC-SA**，派生文本进了公开仓库会被卷入同一许可（docs/CORPUS_DESIGN.md §5）。
 
 ## 两个设计决定
 

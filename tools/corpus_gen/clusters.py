@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """24 个靶区簇 × 4 个同义表达族的定义。
 
-与 CORPUS_DESIGN.md §3 / §4 一一对应。改这里之前先改那份文档——
+与 docs/CORPUS_DESIGN.md §3 / §4 一一对应。改这里之前先改那份文档——
 文档是规格，本文件是它的可执行副本。
 
 族（family）是本项目的核心约束：族内的帖子讲同一件事，但**尽量不共享实词**。
@@ -161,7 +161,7 @@ RESONANCE = [
 
 LAYERS = {"experience": EXPERIENCE, "resonance": RESONANCE}
 
-# CORPUS_DESIGN.md §1：经验类 12×75=900，共鸣类 12×100=1200
+# docs/CORPUS_DESIGN.md §1：经验类 12×75=900，共鸣类 12×100=1200
 PER_CLUSTER = {"experience": 75, "resonance": 100}
 
 STYLES = {

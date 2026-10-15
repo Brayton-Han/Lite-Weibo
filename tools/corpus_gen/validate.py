@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""靶区语料校验（CORPUS_DESIGN.md §2 + Day 3 验收标准）。
+"""靶区语料校验（docs/CORPUS_DESIGN.md §2 + Day 3 验收标准）。
 
 核心是**字符 bigram 的 Jaccard 重叠度**。为什么用字符 bigram 而不是 jieba 分词：
 本项目的词面基线是 `LIKE '%q%'` 和 tsvector，对中文而言它们匹配的就是字符子串，
@@ -23,7 +23,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = ROOT / "corpus" / "manifest.jsonl"
 
-MIN_LEN, MAX_LEN = 30, 200   # 见 CORPUS_DESIGN.md §1「长度口径」
+MIN_LEN, MAX_LEN = 30, 200   # 见 docs/CORPUS_DESIGN.md §1「长度口径」
 ZERO_OVERLAP = 0.05     # Jaccard 低于此视为「词面零重叠」
 NEAR_DUPE = 0.50        # 高于此视为近重复，必须重生成
 MIN_ZERO_PAIRS = 3      # 每簇至少要有这么多组零重叠对（Day 3 验收标准）

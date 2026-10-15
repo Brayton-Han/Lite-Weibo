@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""噪声层抽取器（CORPUS_DESIGN.md Step 2 / §5）。
+"""噪声层抽取器（docs/CORPUS_DESIGN.md Step 2 / §5）。
 
 数据源：Leiden Weibo Corpus，CC BY-NC-SA 3.0，2012 年 1 月采集。
 输入 `LWC-messages/parsed_messages.txt`（2.3GB，MySQL OUTFILE 格式，9 列 CSV）。
@@ -56,7 +56,7 @@ def visible_len(text: str) -> int:
 
 # ---------------------------------------------------------------- 主题中立过滤
 #
-# CORPUS_DESIGN.md §5「硬约束一」：噪声层混入情绪表达类内容会与共鸣类 R01–R12
+# docs/CORPUS_DESIGN.md §5「硬约束一」：噪声层混入情绪表达类内容会与共鸣类 R01–R12
 # 语义重叠，制造假阴性，且系统性打压向量检索。宁可过度排除——候选池有百万级，
 # 只需要 900 条，召回率不重要，纯度才重要。
 
