@@ -706,9 +706,18 @@ nDCG@k = DCG@k / IDCG@k            IDCG 是理想排序下的 DCG
 - 什么情况下 Recall@10 很高但用户体验很差？（答：相关的排在第 9、10 位，而 top-3 全是噪音——所以要同时看 MRR）
 
 ### 🛠 开发 checklist
-- [ ] 在 `src/test` 下写 `RetrievalMetrics` 工具类，实现上述四个指标
-- [ ] 用上面的手算例子写单测，**断言结果和你手算的一致**
-      （这也是项目的第一个真正的单测，顺手破了"零测试"的零）
+- [x] 在 `src/test` 下写 `RetrievalMetrics` 工具类，实现上述四个指标
+  - 位置：`backend/src/test/java/com/brayton/weibo/eval/RetrievalMetrics.java`，泛型 ID，`String` / `Long` 均可
+  - 单 query 粒度：`recallAtK` / `precisionAtK` / `reciprocalRank` / `ndcgAtK`（分级与二值两个重载），
+    跨 query 用 `meanReciprocalRank` / `mean` 做宏平均；`relevantSet` 把 Day 8 的 `{"1024":2,...}` 收敛成 grade > 0 的相关集合
+  - **重复结果只按首次出现计分**：同一帖子在结果里出现多次不会把 Recall / nDCG 抬虚（呼应 Day 5 的去重）
+  - Precision@k 分母恒为 k，返回不足 k 条时不缩分母
+  - **无答案 query 的 Recall / nDCG 直接抛异常**而不是返回 0 或 NaN：Day 8 那 10 条无答案 query
+    必须单独统计拒答，不能悄悄混进均值把数字拉低
+- [x] 用上面的手算例子写单测，**断言结果和你手算的一致**
+  - `RetrievalMetricsTest` 11 个用例全过（2026-10-14）：甲 / 乙两套手算结果（nDCG@3 ≈ 0.704 / 0.235），
+    外加跨 query 求 MRR、全未命中、返回不足 k 条、重复结果、分级 nDCG、非法参数
+  - 原计划"项目第一个单测"已不成立——Day 4–6 已陆续补了 embedding / 回填 / 检索相关的单测
 
 ### ✅ 验收标准
 单测通过，且你能不看笔记讲清 MRR 和 nDCG 的区别。
