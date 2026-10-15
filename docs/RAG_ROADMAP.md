@@ -749,11 +749,18 @@ nDCG@k = DCG@k / IDCG@k            IDCG 是理想排序下的 DCG
 
 ### 🛠 开发 checklist
 
-- [ ] 设计数据格式 `eval/queries.jsonl`：
+> 工具链已就绪（2026-10-14），用法见 `tools/eval_build/README.md`。下面未勾选的项是**要跑数据、要人工标注**的步骤。
+
+- [x] 设计数据格式 `eval/queries.jsonl`：
   ```json
   {"qid":"q001","query":"怎么防止超卖","type":"synonym","relevant":{"1024":2,"1187":1,"1203":2}}
   ```
-- [ ] **半自动构造流程**（省时间的同时保证独立性）：
+  - 定稿多一个 `layer` 字段（`experience` / `resonance` / `null`），Day 9 按层分组报数直接用；
+    `type` 取值 `keyword` / `synonym` / `mixed` / `resonance` / `no_answer`
+  - `relevant` 只放 grade > 0 的帖子（与 `RetrievalMetrics.relevantSet` 的口径一致）；
+    全部判定（含 0 分）另存 `eval/qrels.tsv`，带 `gen_id` 以便重建数据库后重新映射 `post_id`
+  - 训练 / 测试分开存放：`eval/train/queries.jsonl`、`eval/test/queries.jsonl`
+- [x] **半自动构造流程**（省时间的同时保证独立性）：
   1. 从语料中随机抽 150 条帖子
   2. 让 `claude-sonnet-5` 为每条生成 1–2 个"用户可能会这样搜"的 query（**要求用不同的词**，不许复述原文）
   3. 人工筛掉低质量的，留 80 条
@@ -767,12 +774,53 @@ nDCG@k = DCG@k / IDCG@k            IDCG 是理想排序下的 DCG
   > 就是 pooling 会把它们标成相关。**若退化为只标注单一系统的 top-20，
   > 这批污染立刻变成真实偏差，且方向是打压向量检索**——因为向量更容易召回
   > 这些语义相关的噪声帖，被罚得比词面检索更重。见 CORPUS_DESIGN.md §5。
-- [ ] 人工至少**亲手标 20 条**，剩下的用 Claude 标 + 你抽检 30%
-- [ ] 记录 Claude 标注与你人工标注的**一致率**（写进 EVAL.md，这是评测可信度的证据）
-- [ ] 🔑 **共鸣类单独算 Cohen's kappa**：先写标注指南，你和 Claude 各自**独立**标同样的 30 条，算 kappa。
+
+  实现上的取舍：
+  - 第 1–2 步（`gen_queries.py`）：按族分层抽种子帖，150 条按类型预分配（keyword 30 / synonym 40 / mixed 20 / resonance 60，
+    约为配额的两倍），每条写一个指定类型的 query；另写 25 条无答案 query，给出全部 24 簇让撰写者避开。
+    **没有走 API**：脚本导出任务文件 `eval/work/query_task.md`，由 Claude Code 会话按其中的写作要求直接撰写，再由 `import` 机械校验
+    prompt **禁止使用种子帖独有的细节**——否则 query 退化成「找回那一条」的 known-item 搜索，只有一个相关文档
+  - 人工筛选表附两列机械指标：query 与种子帖的字符 bigram Jaccard（同义 / 共鸣类应 ≲0.05），
+    keyword 是否为种子帖子串（LIKE 能命中的前提）
+  - 第 4 步（`EvalPoolRunner`，tools profile）在后端跑而不是在 Python 里重写 SQL：候选池必须与 Day 9 被测的检索路径同口径。
+    来源：`like`（原样的线上搜索，含时间排序）、`trgm`（`word_similarity` 排序，代替对中文无效的 `simple` tsvector）、
+    `vector`（与语义搜索端点同一条 SQL）、`random`，各 top-20；**另加种子帖与它的同义表达族**
+    （CORPUS_DESIGN §2 说族是 pooling 的单位）——它来自元数据而非检索系统，补上所有系统都漏掉的相关帖，
+    否则池子上限就是被测系统召回的并集，Recall 会虚高
+  - 为批量向量化 80 条 query，`EmbeddingClient` 加了 `embedQueries`：与 `embedQuery` 同为 `input_type=query`，
+    但走入库路径的拆批与 429 退避——离线工具等得起
+  - 候选池只收有 `corpus_meta` 的语料帖；**Day 9 的检索策略也要按同一口径剔掉 57 条真实帖子**
+  - 双盲：Claude 与人工都看不到来源、排名、种子帖与族，候选顺序按 qid 定种子打乱；人工表不含 Claude 的分数
+- [x] 人工至少**亲手标 20 条**，剩下的用 Claude 标 + 你抽检 30%
+  - **实际执行：人工只标 100 对**（`label.py sheet --full 10 --per-query 10 --spot 0`）：
+    共鸣类 6 条 query × 10 对 + keyword / synonym 各 2 条 × 10 对，每条 query 在打乱后的池子里均匀取前 10 对。
+    原计划「20 条 query 整池 + 其余抽 30%」约 2,400 对，整池 8 条也有 556 对，均超出单人可承受的量。
+    共鸣类 60 对满足 κ 至少 30 对的下限，但**样本小、κ 的标准误约 ±0.1**，报数时必须连同样本量一起报。
+    名额不足时先砍 no_answer（候选几乎全 0，人机必然一致，会抬虚一致率）与 mixed
+  - **代价（写进 EVAL.md）**：5,148 个判定中只有这 100 对以人工为准，其余 5,048 对的最终分数都来自 Claude；人工的主要作用是校准一致率
+  - Claude 标注没有走 API：`label.py export` 为每条 query 导出盲标任务文件（与 API 路径的 prompt 逐字相同），
+    由 8 个全新上下文的 Claude Code 子代理各标 10 条，只允许读指南与自己的任务文件；`label.py import` 校验完整性
+  - 合并规则：人工标过的以人工为准，其余用 Claude 的
+- [x] 记录 Claude 标注与你人工标注的**一致率**（写进 EVAL.md，这是评测可信度的证据）
+  - `agreement.py` 生成 `eval/AGREEMENT.md`：按类型列完全一致率、二值一致率、Cohen's κ 与线性加权 κ，附混淆矩阵
+  - 结果（2026-10-15，100 对）：完全一致率 **81.0%**，二值一致率 92.0%，κ 0.694 / 线性加权 κ 0.783。
+    分歧主要在人工判 2、Claude 判 1 的 8 对——Claude 更严格地执行了「犹豫时不往高打」
+- [x] 🔑 **共鸣类单独算 Cohen's kappa**：先写标注指南，你和 Claude 各自**独立**标同样的 30 条，算 kappa。
       **低于 0.6 就回去改指南再标一轮**——不要带着一份说不清"相关"是什么的标注集往下走。
       （一个人的项目也能给出 inter-annotator agreement：把 Claude 当第二标注者）
-- [ ] **切分**：`train` 40 条（用于调参）/ `test` 40 条（**最终报数，中途绝不看**）
+  - [x] 标注指南：`eval/LABELING_GUIDE.md`，共鸣类拆成压力源 / 情绪状态 / 处境三个维度。
+        **Claude 的 system prompt 就是这份文件原文**——两边看的不是同一份指南，kappa 就没有意义
+  - 结果：共鸣类 κ **0.690**（60 对，标准误约 ±0.1），过 0.6 线，指南未改
+  - 「30 条」按 (query, 帖子) 对计；整池标 6 条共鸣类 query 就有几百对，`agreement.py` 不足 30 对时直接判不通过
+- [x] **切分**：`train` 40 条（用于调参）/ `test` 40 条（**最终报数，中途绝不看**）
+  - `split.py` 按类型分层切分，奇数配额的多出来那条轮流给两边，保证各 40；
+    同一条种子帖派生的多条 query（如 synonym「欧洲旅游签要准备哪些东西」与 mixed「申根visa材料清单」）
+    强制同侧——问的是同一件事，分属两侧就等于调参时见过测试题。与同类型的 query 对调，各类型条数不变；
+    切分前校验：非无答案 query 至少 1 条相关帖、无答案 query 不得有相关帖
+  - 结果：train 40 / test 40，判定 5,148 个（人工 100 / Claude 5,048），0/1/2 = 3,553 / 929 / 666；
+    相关帖按层：经验 774 / 共鸣 811 / 噪声 10；每条 query 相关帖 min 4 / 中位 21 / max 43；10 条无答案 query 全部 0 相关
+  - 池子覆盖：1,597 条相关帖中 **491 条（31%）只由种子帖与同义表达族那一路贡献**，四个检索系统的 top-20 都没召回；
+    随机抽样独有的 1,571 个候选里仅 10 条相关、且全是 1 分——池外大概率没有漏掉高度相关的帖子
 
 ### ✅ 验收标准
 - 80 条 query，覆盖 5 种类型且**三层语料都有覆盖**，每条至少 1 个相关文档（无答案 query 除外）

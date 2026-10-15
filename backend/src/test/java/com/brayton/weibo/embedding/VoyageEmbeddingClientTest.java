@@ -75,6 +75,24 @@ class VoyageEmbeddingClientTest {
     }
 
     @Test
+    void batchQueriesUseQueryInputTypeAndRetry429() {
+        // 离线批量查询走入库路径的重试：429 后退避重试，而不是像 embedQuery 那样立即失败
+        server.expect(jsonPath("$.input_type").value("query"))
+                .andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS));
+        server.expect(jsonPath("$.input.length()").value(2)).andExpect(jsonPath("$.input_type").value("query"))
+                .andRespond(withSuccess(response(0, 1), MediaType.APPLICATION_JSON));
+        server.expect(jsonPath("$.input.length()").value(1)).andExpect(jsonPath("$.input_type").value("query"))
+                .andRespond(withSuccess(response(2), MediaType.APPLICATION_JSON));
+
+        List<float[]> out = client.embedQueries(List.of("q1", "q2", "q3"));
+
+        assertThat(out).hasSize(3);
+        IntStream.range(0, 3).forEach(i -> assertThat(out.get(i)[0]).isEqualTo((float) i));
+        assertThat(sleeps).hasSize(1);
+        server.verify();
+    }
+
+    @Test
     void retries429HonoringRetryAfterThenSucceeds() {
         HttpHeaders h = new HttpHeaders();
         h.add(HttpHeaders.RETRY_AFTER, "7");

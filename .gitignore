@@ -12,3 +12,7 @@ LWC-messages/
 
 # 个人面试准备笔记，只留本地
 docs/PROJECT_ANALYSIS.*
+
+# Day 8 评测集构造的中间产物：候选池与标注表含帖子正文（噪声层为 LWC 派生文本，同上受 SA 约束）。
+# 最终的 eval/{train,test}/queries.jsonl、eval/qrels.tsv 只含 query 与 post_id，可以提交。
+eval/work/

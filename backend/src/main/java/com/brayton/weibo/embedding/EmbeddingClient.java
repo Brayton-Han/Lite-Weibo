@@ -20,6 +20,13 @@ public interface EmbeddingClient {
     float[] embedQuery(String text);
 
     /**
+     * 批量向量化查询，供离线评测一次性嵌入整个 query 集。
+     * 与 {@link #embedQuery} 同一 input_type，但按入库路径的策略拆批与重试（含 429 退避）——
+     * 离线工具等得起，逐条快速失败反而会被限流打断。
+     */
+    List<float[]> embedQueries(List<String> texts);
+
+    /**
      * 向量化待入库的文档（Voyage input_type = document）。
      * 返回顺序与入参一一对应；实现负责按服务端上限拆批与重试。
      */
