@@ -1,0 +1,41 @@
+qid	type	layer	n_relevant	returned	judged	recall	precision	rr	ndcg	latency_ms	ranked
+q001	keyword	experience	11	1	1	0.0909	0.1000	1.0000	0.3239	1.32	4286:2
+q002	keyword	experience	18	2	2	0.1111	0.2000	1.0000	0.3352	1.55	3853:2,3200:1
+q004	keyword	experience	28	3	3	0.1071	0.3000	1.0000	0.4407	1.58	4860:2,4560:1,3266:1
+q005	keyword	experience	19	4	4	0.2105	0.4000	1.0000	0.4698	1.74	5391:2,5099:1,4909:1,4713:2
+q006	keyword	experience	20	4	4	0.2000	0.4000	1.0000	0.3742	1.97	5303:1,5279:1,4649:2,3644:1
+q007	keyword	experience	4	1	1	0.2500	0.1000	1.0000	0.3904	1.19	4149:1
+q010	keyword	experience	11	1	1	0.0909	0.1000	1.0000	0.2548	1.19	6104:2
+q015	keyword	experience	31	1	1	0.0323	0.1000	1.0000	0.2670	1.74	4065:2
+q017	synonym	experience	19	0	0	0.0000	0.0000	0.0000	0.0000	1.21	
+q018	synonym	experience	9	0	0	0.0000	0.0000	0.0000	0.0000	0.99	
+q019	synonym	experience	9	0	0	0.0000	0.0000	0.0000	0.0000	1.01	
+q020	synonym	experience	24	0	0	0.0000	0.0000	0.0000	0.0000	0.99	
+q022	synonym	experience	14	0	0	0.0000	0.0000	0.0000	0.0000	1.07	
+q026	synonym	experience	19	0	0	0.0000	0.0000	0.0000	0.0000	1.19	
+q028	synonym	experience	18	0	0	0.0000	0.0000	0.0000	0.0000	0.92	
+q032	synonym	experience	20	0	0	0.0000	0.0000	0.0000	0.0000	1.11	
+q034	synonym	experience	11	0	0	0.0000	0.0000	0.0000	0.0000	1.05	
+q035	synonym	experience	19	0	0	0.0000	0.0000	0.0000	0.0000	1.05	
+q038	mixed	experience	17	0	0	0.0000	0.0000	0.0000	0.0000	1.17	
+q041	mixed	experience	22	0	0	0.0000	0.0000	0.0000	0.0000	1.00	
+q043	mixed	experience	13	0	0	0.0000	0.0000	0.0000	0.0000	1.03	
+q044	mixed	experience	32	0	0	0.0000	0.0000	0.0000	0.0000	1.13	
+q045	mixed	experience	35	0	0	0.0000	0.0000	0.0000	0.0000	0.96	
+q046	resonance	resonance	39	0	0	0.0000	0.0000	0.0000	0.0000	0.93	
+q051	resonance	resonance	28	0	0	0.0000	0.0000	0.0000	0.0000	0.88	
+q052	resonance	resonance	30	0	0	0.0000	0.0000	0.0000	0.0000	0.91	
+q053	resonance	resonance	29	0	0	0.0000	0.0000	0.0000	0.0000	0.97	
+q055	resonance	resonance	39	0	0	0.0000	0.0000	0.0000	0.0000	0.90	
+q056	resonance	resonance	31	0	0	0.0000	0.0000	0.0000	0.0000	0.98	
+q060	resonance	resonance	29	0	0	0.0000	0.0000	0.0000	0.0000	1.01	
+q062	resonance	resonance	31	0	0	0.0000	0.0000	0.0000	0.0000	1.05	
+q064	resonance	resonance	30	0	0	0.0000	0.0000	0.0000	0.0000	0.88	
+q065	resonance	resonance	38	0	0	0.0000	0.0000	0.0000	0.0000	0.87	
+q068	resonance	resonance	26	0	0	0.0000	0.0000	0.0000	0.0000	0.93	
+q070	resonance	resonance	28	0	0	0.0000	0.0000	0.0000	0.0000	0.98	
+q074	no_answer		0	0	0					0.98	
+q075	no_answer		0	0	0					0.93	
+q077	no_answer		0	0	0					0.96	
+q079	no_answer		0	0	0					0.99	
+q080	no_answer		0	0	0					1.05	

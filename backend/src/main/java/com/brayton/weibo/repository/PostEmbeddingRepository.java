@@ -150,11 +150,24 @@ public class PostEmbeddingRepository {
      * SET LOCAL 只在当前事务内生效，所以要包事务——否则参数会留在连接池里的这条连接上，污染后续查询。
      * iterative_scan（pgvector 0.8+）：HNSW 先取出 ef_search 个候选再执行 WHERE，过滤掉的多了结果会不足 k 条；
      * 开启后索引会继续往下扫直到凑够。relaxed_order 允许结果略微乱序，外层按分数重排，不受影响。
+     *
+     * <h3>为什么强制 custom plan</h3>
+     * 同一条连接上执行满 5 次后 pgjdbc 改用服务端预编译语句，PostgreSQL 随即可能改用 generic plan。
+     * generic plan 下 {@code ?::vector} 不再是常量：每一行都要把十几 KB 的向量文本重新解析一遍，
+     * 而且 LIMIT 未知，规划器放弃 HNSW 走全表扫描。实测 3000 条语料时单次查询从 ~1ms 变成 ~280ms，并随语料线性增长
+     * （RAG Day 9 评测发现）。custom plan 每次按实际参数规划，向量只解析一次、LIMIT 已知、能用上索引。
      */
     @Transactional(readOnly = true)
     public List<Hit> searchNearest(float[] query, String modelId, int k) {
+        return searchNearest(query, modelId, k, efSearch);
+    }
+
+    /** 指定 ef_search 的版本，供评测扫参（Day 11）；线上路径用上面的配置值。 */
+    @Transactional(readOnly = true)
+    public List<Hit> searchNearest(float[] query, String modelId, int k, int efSearch) {
         jdbc.queryForObject("SELECT set_config('hnsw.ef_search', ?, true)", String.class, String.valueOf(efSearch));
         jdbc.queryForObject("SELECT set_config('hnsw.iterative_scan', 'relaxed_order', true)", String.class);
+        jdbc.queryForObject("SELECT set_config('plan_cache_mode', 'force_custom_plan', true)", String.class);
         String vec = toPgVector(query);
         return jdbc.query(SEARCH, (rs, i) -> new Hit(rs.getLong("post_id"), rs.getDouble("score")),
                 vec, modelId, VISIBILITY_PUBLIC, vec, k * CHUNK_OVERSAMPLE, k);

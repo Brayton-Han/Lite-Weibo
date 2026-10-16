@@ -846,25 +846,50 @@ nDCG@k = DCG@k / IDCG@k            IDCG 是理想排序下的 DCG
 
 ### 🛠 开发 checklist
 
-- [ ] 写 `RagEvalRunner`（放 `src/test` 或 `tools` profile）：
+- [x] 写 `RagEvalRunner`（放 `src/test` 或 `tools` profile）：
   - 读 `eval/queries.jsonl`
   - 对每条 query 调用指定的 `RetrievalStrategy`
   - 算四个指标 + 记录延迟
   - 输出 `eval/results/{strategy}_{timestamp}.tsv` 和一份汇总
-- [ ] 抽象检索策略接口，让方案可插拔：
+  - 放 `tools` profile（`EVAL_RUN=true`），与 `EvalPoolRunner` 一致；`RetrievalMetrics` 因此从 `src/test` 挪到 `src/main` 的 `eval` 包，单测不动
+  - `EVAL_SPLIT` 默认 `train`，test 要显式指定；`EVAL_STRATEGIES` / `EVAL_K` / `EVAL_EF_SEARCH` 可配，用法见 `docs/EVAL.md`
+  - 文件名多带一段 split：`{strategy}_{split}_{时间戳}.tsv`，汇总 `summary_{split}_{时间戳}.md`
+  - **只在语料帖里排名**：先按 k 取，剔除非语料帖后不足 k 条再成倍加深重取。非语料帖实测已是 157 条（不是 Day 3 的 57 条）。
+    不一次多取 157 条：内层 LIMIT 一大，向量路就从 HNSW 换成精确全表扫描，测的不再是线上路径
+  - 🐛 **顺带修了线上语义搜索的性能 bug**：pgjdbc 执行满 5 次后改用服务端预编译，PostgreSQL 换成 generic plan，
+    `?::vector` 每行重新解析 12 KB 文本、且放弃 HNSW 走全表，单次 ~280 ms 并随语料线性增长。
+    `searchNearest` 加 `SET LOCAL plan_cache_mode = force_custom_plan` 后 p50 1.9 ms。详见 `docs/EVAL.md`
+  - 加了 **judged@k**（返回结果中有判定的比例）：三条基线是候选池来源，应为 100%（实测如此，也顺带验证了 tsrank 与候选池 trgm 一路同口径）；
+    Day 11 之后的策略会把池外帖子排上来，这一列掉下去就要先补标
+  - 延迟：每个策略先空跑一遍预热再计时，只计深度为 k 的那一次调用（加深重取不计）；向量路的 query 向量缓存在 `eval/work/query_vectors.jsonl`，延迟不含 embedding API
+  - 无答案 query 不进均值，单独报「返回空结果」
+  - `RagEvalRunnerTest` 7 个用例：剔除非语料帖后再截断、按需加深重取、分级 nDCG、无答案、judged@k、分位数、分层汇总
+- [x] 抽象检索策略接口，让方案可插拔：
   ```java
   public interface RetrievalStrategy {
       String name();
       List<ScoredPost> retrieve(String query, int k, Long requesterId);
   }
   ```
-- [ ] 实现前三个策略：
-  - [ ] `LikeStrategy` —— 包装现有的 `searchChinesePosts`/`searchPosts`（**保持原样，包括 `ORDER BY created_at DESC`**）
-  - [ ] `TsRankStrategy` —— tsvector + `ts_rank` 相关性排序（中文用 `similarity()` from pg_trgm）
-  - [ ] `VectorStrategy` —— 纯向量，`ef_search` 可配
-- [ ] 跑出 baseline 并记录到 `EVAL.md`
-- [ ] 🔑 **分层报数字**：按 Day 3 的语料层（经验类 / 共鸣类）+ query 类型**双重分组**统计。
+  - 在 `com.brayton.weibo.retrieval`；三条基线目前都只检索 PUBLIC，`requesterId` 先留着
+- [x] 实现前三个策略：
+  - [x] `LikeStrategy` —— 包装现有的 `searchChinesePosts`/`searchPosts`（**保持原样，包括 `ORDER BY created_at DESC`**）
+  - [x] `TsRankStrategy` —— tsvector + `ts_rank` 相关性排序（中文用 `similarity()` from pg_trgm）
+    - 中文实际用 `word_similarity(q, content)` 而不是 `similarity()`：后者拿短 query 和整条帖子比，帖子越长分越低。
+      与 Day 8 候选池的 trgm 一路同口径；全表算分、无阈值，Day 10 再走索引
+  - [x] `VectorStrategy` —— 纯向量，`ef_search` 可配
+    - `PostEmbeddingRepository.searchNearest` 加了带 `efSearch` 的重载；向量化通过 `Function<String, float[]>` 注入，评测时接缓存
+- [x] 跑出 baseline 并记录到 `EVAL.md`
+  - train，2026-10-15，`docs/EVAL.md`：nDCG@10 like 0.082 / tsrank 0.257 / vector 0.766
+- [x] 🔑 **分层报数字**：按 Day 3 的语料层（经验类 / 共鸣类）+ query 类型**双重分组**统计。
       **绝对不要只报一个总的 Recall@10**——合成一个数会把下面那个最关键的结论抹平
+  - 汇总按 经验层（再展开 keyword / synonym / mixed）/ 共鸣层 / 全部可答 分组，Recall / nDCG / MRR / P 各一张表
+  - ⚠️ **实测与下方「预期现象」不符：分裂按 query 类型出现，而不是按语料层。** `tsrank` 共鸣层 / 经验层 nDCG 0.255 / 0.259 持平，
+    向量对它的领先在两层也相近（3.3× / 2.8×）；词面唯一占优的是 keyword 类的 MRR（like 1.000 / vector 0.826，q001「考核期」、q002「脱产复习」）。
+    但 n = 8、差距只来自两条 query，MRR 置信区间 [0.00, 0.41] 不显著。向量在 nDCG 上没有输过任何分组——
+    Day 9 的数据不支持「各有主场所以融合」，Day 11 的 RRF 要用数据证明自己，不能预设「融合必胜」。见 `docs/EVAL.md` 读数第 3–5 条
+  - ⚠️ **效度局限**：相关集平均 85% 是种子帖的同义表达族，vector top-10 有 71% 来自该族——评测实际在测「找回预先合成的语义簇」，
+    对向量天然有利。策略间的方向可信，nDCG 0.766 等绝对值不可外推到真实语料。见 `docs/EVAL.md`「效度局限」
 
 ### ✅ 验收标准
 一条命令跑出三行数字，且每行都能**按语料层展开**。**现在你有尺子了。**
