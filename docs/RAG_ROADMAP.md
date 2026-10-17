@@ -927,7 +927,7 @@ nDCG@k = DCG@k / IDCG@k            IDCG 是理想排序下的 DCG
 
 ### 🛠 开发 checklist
 
-- [ ] 中文路改用 `pg_trgm` 的 `similarity()` 排序，替代 `LIKE` + 时间排序：
+- [x] 中文路改用 `pg_trgm` 的 `similarity()` 排序，替代 `LIKE` + 时间排序：
   ```sql
   SELECT p.id, similarity(p.content, :q) AS score
   FROM posts p
@@ -936,18 +936,51 @@ nDCG@k = DCG@k / IDCG@k            IDCG 是理想排序下的 DCG
   ORDER BY score DESC
   LIMIT :k;
   ```
-- [ ] 英文路改用 `ts_rank_cd(search_vector, plainto_tsquery(...))` 排序
-- [ ] 调 `pg_trgm.similarity_threshold`（默认 0.3，对短 query 可能太严）
-- [ ] 跑 eval，记录 `TsRankStrategy` 相对 `LikeStrategy` 的提升
-- [ ] `EXPLAIN ANALYZE` 确认走了 GIN 索引而不是全表扫
+  - 线上 `/posts/search` 中文路改走 `PostLexicalSearchRepository`，评测的 `TsRankStrategy` 中文路调同一个方法；
+    `LikeStrategy` 仍用旧的 `searchChinesePosts` 作基线
+  - 实际用 `word_similarity(:q, content)` 排序、`:q <% content` 过滤：沿用 Day 9 的口径，
+    `similarity()` 拿短 query 与整条帖子比，会偏向短帖；`<%` 同样走 `gin_trgm_ops` 索引
+  - 翻页改为 `(score DESC, id)` keyset，游标仍是上一页最后一条的 id（服务端按 id 重算分数），前端不用改
+  - ⚠️ 阈值在事务内 `set_config('pg_trgm.word_similarity_threshold', ?, true)`，线上 `search.trgm.threshold`、评测 `EVAL_TRGM_THRESHOLD`，默认 0.05（第 3 项扫参结果）。
+    pg 默认 0.6 对中文等于没有结果：中文无空格，query 首尾带词边界的 trigram 在正文中间配不上，原文出现的「考核期」也只有 0.5。
+    train 40 条 query 在 0.1 / 0.15 / 0.2 下分别有 3 / 11 / 18 条零命中——阈值是硬截断
+- [x] 英文路改用 `ts_rank_cd(search_vector, plainto_tsquery(...))` 排序
+  - 同样改线上：`PostService#getSearchResults` 英文路走 `PostLexicalSearchRepository#searchEnglish`，命中条件不变（`@@`，走 `idx_post_search`），
+    排序由 `created_at DESC` 改为 `ts_rank_cd`，翻页同中文路的 `(score, id)` keyset；`TsRankStrategy` 英文路从 `ts_rank` 换成同一个方法
+  - ⚠️ train 40 条 query 全部含汉字，英文路在当前评测集上**没有样本**，第 4 项的数字反映不出这一改动
+- [x] 调 `pg_trgm.similarity_threshold`（默认 0.3，对短 query 可能太严）
+  - 实际调的是 `word_similarity_threshold`（`<%` 用它，pg 默认 0.6）。train 上扫 {0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3}，**定 0.05**，见 `docs/EVAL.md` Day 10
+  - 指标随阈值单调下降，没有「调严反而更准」的区间：被截掉的低分帖里也有相关帖，而留下的帖子排序不变。
+    0 / 0.05 与 Day 9 全表算分完全一致（nDCG@10 0.257）；0.1 起 synonym / 共鸣两类先掉（0.1：0.234，0.3：0.112），keyword 撑到 0.25 才动
+  - 0.05 ≈「至少共享一个 trigram」（这批 query 最多 16 个 trigram，最小非零分 ≥ 0.0625），候选中位数 48 / 3157，最多 468
+  - 顺带：走索引后 5 条无答案 query 有 2 条返回空（Day 9 全表算分一律凑满 10 条），p50 27.0 → 1.6 ms
+- [x] 跑 eval，记录 `TsRankStrategy` 相对 `LikeStrategy` 的提升
+  - train，2026-10-16，`docs/EVAL.md` Day 10：nDCG@10 like 0.082 → tsrank 0.257（Δ +0.176，95% CI [+0.102, +0.252]），MRR 0.229 → 0.675
+  - ⚠️ **提升来自命中条件，不是排序**：LIKE 在 27 / 35 条可答 query 上零结果，trigram 全部有结果；
+    LIKE 本来有结果的 8 条 keyword query 上 Δ nDCG 仅 +0.004（CI 跨 0），MRR −0.125。下方面试钩子「光这一步」的说法要改成「换成模糊匹配 + 相关性排序」
+  - ⚠️ 短中文 query 的 trgm 分数没有区分度：q005「小电驴」原样命中的帖子与只在标点后出现「小」的帖子同为 0.25，48 条并列，相关帖按 id 被挤出 top-10（nDCG 0.470 → 0）
+  - 英文路在 train 上没有样本，`ts_rank_cd` 的改动未被量化
+- [x] `EXPLAIN ANALYZE` 确认走了 GIN 索引而不是全表扫
+  - 英文路 custom / generic plan 都走 `idx_post_search`；中文路 generic plan 走 `idx_posts_content_trgm`
+  - ⚠️ **中文路 custom plan 有 16 / 40 条 query 退化成 seq scan**（最慢 37.7 ms，索引 ~2 ms）：行数估得准，但 pg_trgm 函数默认 `COST 1`，
+    规划器低估了逐行算 `<%` 的代价。pgjdbc 每条连接前 5 次执行都是 custom plan，线上会遇到
+  - 修：`V5__trgm_function_cost.sql` 把 `word_similarity_op` / `word_similarity` 的 COST 调到 100，40 条全部走索引，合计 484 → 50 ms，指标不变。
+    评测延迟发现不了这个问题（预热后已是 generic plan），见 `docs/EVAL.md` Day 10「执行计划」
 
 ### ✅ 验收标准
 词面路的 nDCG 明显优于原始 `LIKE`，且查询走索引。
+- ✅ 已达成（train，2026-10-16）：nDCG@10 0.082 → 0.257，CI [+0.102, +0.252]；两路查询在 custom / generic plan 下都走索引（中文路需 V5）
 
 ### 💬 面试钩子
 > "原来的中文搜索是 `LIKE '%q%'` 加 `ORDER BY created_at DESC`——**连相关性排序都没有**，
 > 命中的帖子纯按时间排。我先把这一路修成 trigram 相似度排序，光这一步 nDCG 就从 x 提到 y，
 > 还没动向量。这让我意识到：**很多所谓的 AI 提升，其实是传统搜索没做好。**"
+
+> ⚠️ **Day 10 实测修正**：x = 0.082，y = 0.257，但「光这一步」不成立——提升来自命中条件（精确子串 → trigram 模糊匹配）：
+> LIKE 本来有结果的 8 条 keyword query 上，只改排序 Δ nDCG = +0.004（CI 跨 0）。更站得住的说法：
+> "原来的中文搜索是 `LIKE` 加时间排序，35 条可答 query 里 27 条直接零结果。换成 trigram 模糊匹配 + 相似度排序，nDCG 从 0.082 到 0.257，
+> 还没动向量。但我拆开看过：在 LIKE 本来就能命中的 keyword query 上排序几乎没带来提升，3 倍全来自召回——所以传统搜索的问题首先是'找不到'，其次才是'排不好'。"
+> 可以顺带讲 custom plan 退化成 seq scan、靠调函数 COST 修好的那一段：说明你看执行计划，而不是只看评测延迟。
 
 这句话会让面试官对你刮目相看——它证明你不迷信 AI。
 

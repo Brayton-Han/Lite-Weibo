@@ -4,6 +4,7 @@ import com.brayton.weibo.embedding.EmbeddingClient;
 import com.brayton.weibo.eval.RetrievalMetrics;
 import com.brayton.weibo.repository.PostEmbeddingRepository;
 import com.brayton.weibo.repository.PostRepository;
+import com.brayton.weibo.repository.PostLexicalSearchRepository;
 import com.brayton.weibo.retrieval.LikeStrategy;
 import com.brayton.weibo.retrieval.RetrievalStrategy;
 import com.brayton.weibo.retrieval.ScoredPost;
@@ -47,6 +48,7 @@ import java.util.stream.Collectors;
  *   <li>{@code EVAL_STRATEGIES}：逗号分隔，默认 {@code like,tsrank,vector}</li>
  *   <li>{@code EVAL_K}：截断深度，默认 10</li>
  *   <li>{@code EVAL_EF_SEARCH}：向量路的 hnsw.ef_search，默认取 {@code embedding.search.ef-search}</li>
+ *   <li>{@code EVAL_TRGM_THRESHOLD}：tsrank 中文路的 word_similarity 下限，默认取 {@code search.trgm.threshold}</li>
  *   <li>{@code EVAL_DIR}：默认 {@code ../eval}</li>
  * </ul>
  *
@@ -102,6 +104,7 @@ public class RagEvalRunner implements CommandLineRunner {
     private final PostEmbeddingRepository embeddingRepository;
     private final EmbeddingClient embeddingClient;
     private final Environment environment;
+    private final PostLexicalSearchRepository lexicalRepository;
     private final ObjectMapper mapper = new ObjectMapper();
 
     @Override
@@ -113,6 +116,8 @@ public class RagEvalRunner implements CommandLineRunner {
         String split = env("EVAL_SPLIT", "train");
         int k = Integer.parseInt(env("EVAL_K", "10"));
         int efSearch = Integer.parseInt(env("EVAL_EF_SEARCH", environment.getProperty("embedding.search.ef-search", "100")));
+        // 中文 trgm 路的 word_similarity 下限；默认取线上配置，见 PostLexicalSearchRepository
+        double trgmThreshold = Double.parseDouble(env("EVAL_TRGM_THRESHOLD", environment.getProperty("search.trgm.threshold", "0.05")));
         List<String> names = Arrays.stream(env("EVAL_STRATEGIES", "like,tsrank,vector").split(","))
                 .map(String::strip).filter(s -> !s.isEmpty()).toList();
 
@@ -126,7 +131,7 @@ public class RagEvalRunner implements CommandLineRunner {
         for (String name : names) {
             strategies.add(switch (name) {
                 case "like" -> new LikeStrategy(postRepository);
-                case "tsrank" -> new TsRankStrategy(jdbc);
+                case "tsrank" -> new TsRankStrategy(lexicalRepository, trgmThreshold);
                 case "vector" -> {
                     Map<String, float[]> vectors = queryVectors(evalDir, queries);
                     yield new VectorStrategy(embeddingRepository, embeddingClient.modelId(), vectors::get, efSearch);
@@ -163,10 +168,10 @@ public class RagEvalRunner implements CommandLineRunner {
         String header = String.format("""
                 # 检索评测 · %s · %s
 
-                - split = `%s`（%d 条 query），k = %d，ef_search = %d，embedding = `%s`
+                - split = `%s`（%d 条 query），k = %d，ef_search = %d，trgm 阈值 = %s，embedding = `%s`
                 - 只在语料帖（%d 条）中排名；非语料帖 %d 条从结果中剔除
                 - 向量路延迟不含 embedding API 调用（query 向量走缓存）
-                """, split, ts, split, queries.size(), k, efSearch, embeddingClient.modelId(), corpus.size(), nonCorpus);
+                """, split, ts, split, queries.size(), k, efSearch, trgmThreshold, embeddingClient.modelId(), corpus.size(), nonCorpus);
         String summary = header + "\n" + summarize(all, k);
         Path md = outDir.resolve("summary_" + split + "_" + ts + ".md");
         Files.writeString(md, summary, StandardCharsets.UTF_8);

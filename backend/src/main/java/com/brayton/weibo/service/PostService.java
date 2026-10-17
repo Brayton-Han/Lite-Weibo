@@ -45,6 +45,7 @@ public class PostService {
     private final ApplicationEventPublisher publisher;
     private final EmbeddingClient embeddingClient;
     private final PostEmbeddingRepository embeddingRepository;
+    private final PostLexicalSearchRepository lexicalSearchRepository;
 
     public static final int SEMANTIC_QUERY_MAX_LENGTH = 200;
     public static final int SEMANTIC_MAX_K = 50;
@@ -381,30 +382,30 @@ public class PostService {
                 .toList();
     }
 
+    /**
+     * 词面搜索，按相关性排序（RAG Day 10）；原来两路都是「命中即可、按时间排」，没有相关性可言。
+     * 含汉字走 trigram 相似度，否则走 ts_rank_cd。游标仍是上一页最后一条的 id，翻页语义见 {@link PostLexicalSearchRepository}。
+     */
     public List<PostResponse> getSearchResults(String query, Long lastId, int size, Long selfId) {
 
-        lastId = lastId == null ? Long.MAX_VALUE : lastId;
-
-        List<Post> posts;
-        boolean containsChinese = ChineseUtil.containsChinese(query);
-        if (containsChinese)
-            posts = postRepository.searchChinesePosts(
-                    "%" + query + "%",
-                    lastId,
-                    List.of(PostVisibility.PUBLIC),
-                    PageRequest.of(0, size)
-            );
-        else
-            posts = postRepository.searchPosts(
-                    query,
-                    lastId,
-                    List.of(PostVisibility.PUBLIC),
-                    PageRequest.of(0, size)
-            );
-
-        return posts.stream()
-                .map(post -> buildPostResponse(post, selfId, false, false))
+        List<Long> ids = (ChineseUtil.containsChinese(query)
+                ? lexicalSearchRepository.searchChinese(query, lastId, size)
+                : lexicalSearchRepository.searchEnglish(query, lastId, size))
+                .stream()
+                .map(PostLexicalSearchRepository.Hit::postId)
                 .toList();
+        Map<Long, Post> posts = postRepository.findByIdInWithUser(ids).stream()
+                .collect(Collectors.toMap(Post::getId, p -> p));
+
+        // 按相关性顺序组装；检索与加载之间被删除的帖子由 @Where 滤掉，可见性这里再判一次
+        List<PostResponse> result = new ArrayList<>(ids.size());
+        for (Long id : ids) {
+            Post post = posts.get(id);
+            if (post != null && post.getVisibility() == PostVisibility.PUBLIC) {
+                result.add(buildPostResponse(post, selfId, false, false));
+            }
+        }
+        return result;
     }
 
 

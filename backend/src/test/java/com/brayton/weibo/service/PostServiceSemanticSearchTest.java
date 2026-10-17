@@ -31,7 +31,8 @@ class PostServiceSemanticSearchTest {
     private final PostService service = new PostService(
             postRepository, mock(UserRepository.class), mock(FollowRepository.class), mock(LikeRepository.class),
             mock(CommentRepository.class), mock(RedisService.class), mock(WebSocketPusher.class),
-            mock(ApplicationEventPublisher.class), client, embeddingRepository);
+            mock(ApplicationEventPublisher.class), client, embeddingRepository,
+            mock(PostLexicalSearchRepository.class));
 
     private final float[] vec = {0.1f};
 
