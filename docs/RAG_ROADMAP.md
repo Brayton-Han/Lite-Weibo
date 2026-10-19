@@ -1024,18 +1024,41 @@ D: 0        + 1/(60+2) = 0.01613
 
 ### 🛠 开发 checklist
 
-- [ ] 实现 `HybridRrfStrategy`：
+- [x] 实现 `HybridRrfStrategy`：
   - 并行执行词面检索和向量检索（用项目已有的线程池，各取 top-N，N 建议 50）
   - 按 RRF 公式融合
   - 返回 top-k
-- [ ] **参数扫描（只在 train 集上）**：
+  - 两路直接组合 `TsRankStrategy` + `VectorStrategy`；评测接 `feedTaskExecutor`（CallerRuns，不会丢任务把调用方挂死）
+  - 每路取 `max(N, k)`，评测加深重取时跟着加深；同分按 id 升序，输出确定
+  - `RagEvalRunner` 加 `rrf` 策略，`EVAL_RRF_N` / `EVAL_RRF_K` 默认 50 / 60；`HybridRrfStrategyTest` 6 个用例（含上面的手算练习）
+- [x] **参数扫描（只在 train 集上）**：
   - `k` ∈ {10, 30, 60, 100}
   - 单路召回数 N ∈ {20, 50, 100}
   - `hnsw.ef_search` ∈ {40, 100, 200}
   - 输出一张扫描结果表
-- [ ] 选定最优配置，**固定下来**
-- [ ] 加权 RRF 变体（给向量路更高权重）也试一下，看是否有提升
-- [ ] 记录延迟：混合检索比单路慢多少？是否可接受？
+  - `eval/results/sweep_train_20261019-105652/`，表与读数见 `docs/EVAL.md`「Day 11 · RRF 参数扫描」；
+    `RagEvalRunner` 的 `EVAL_EF_SEARCH` / `EVAL_RRF_N` / `EVAL_RRF_K` 支持逗号分隔多值，一次跑完笛卡尔积
+  - ⚠️ **等权 RRF 在 36 个配置上全部显著输给纯向量**：最好 nDCG@10 0.635 vs 0.766（Δ −0.131，CI [−0.176, −0.084]，35 条输 30 条）。
+    两路 top-10 平均只重叠 1.38 条，RRF 退化成按名次交替合并，词面那一半的低精度直接拉低结果；只有 q001 / q002 等 keyword query 受益。
+    **验收标准「优于两条单路」目前不成立**
+  - N = 20 时对 k 完全不敏感，但那是因为两路几乎不相交，不是「鲁棒」；N 加大后 k 越大越差（深处的共识是噪声）
+  - ef_search 测不出质量差异：N ≥ 50 或 ef = 200 时规划器改走精确全表扫描（p50 2.5 → 10 ms），指标与 HNSW 完全相同
+- [x] 选定最优配置，**固定下来**
+  - **k = 10、N = 20、向量权重 w = 10、ef_search = 100**，设为 `RagEvalRunner` 的默认值（`EVAL_RRF_N/K/W`）；
+    train nDCG@10 0.771 vs vector 0.766，MRR 0.956 vs 0.941，是唯一不输给任何一路的配置
+  - ⚠️ **提升不显著**：Δ nDCG +0.005，CI [−0.000, +0.013]，35 条里 22 条不变，收益几乎全来自 q001「考核期」；
+    又是约 100 个配置里挑的最优点，test 上大概率持平。验收「优于两条单路」按点估计满足、按显著性不满足
+- [x] 加权 RRF 变体（给向量路更高权重）也试一下，看是否有提升
+  - `HybridRrfStrategy` 加了向量一路权重 w（词面固定 1），`EVAL_RRF_W` 可扫；w → ∞ 即纯向量
+  - 等权 0.635 → w = 2 时 0.762 → w = 10 时 0.771 → w ≥ 15（k = 10）nDCG 与 vector 相同。最优点由 w / k 决定（k30 w30、k60 w50 同为 0.771）
+  - 选定配置下词面独有的帖子进不了向量 top-20 之前，**词面实际只是给向量结果做 tie-breaker**，只在 keyword query 上有用
+  - 小 w 换 MRR：k10 w2 的 MRR 0.981（q002 0.11 → 1.0）但 nDCG 0.762；按 nDCG 选了 w = 10，见 `docs/EVAL.md`「Day 11 · 加权 RRF」
+- [x] 记录延迟：混合检索比单路慢多少？是否可接受？
+  - `EVAL_LATENCY_REPEAT=21`（每条 query 计时 21 次取中位数），正序 / 倒序各跑一次：p50 vector 2.1 → rrf 2.4 ms（+0.3 ms），p95 多 1–2 ms；
+    串行版 `rrf-serial` 4.0–4.2 ms，并行省约 1.7 ms。见 `docs/EVAL.md`「Day 11 · 延迟」
+  - 可以接受：线上还有一次 embedding API 往返（本次无 key，未实测），检索的 0.3 ms 可忽略
+  - ⚠️ 尾延迟来自词面路（q062 tsrank ~9.5 ms，468 条 trgm 候选），随语料线性增长；
+    共用 `feedTaskExecutor` 在扇出高峰时可能让搜索排队，评测是串行的测不出来——上线前换独立线程池并压测
 
 ### ✅ 验收标准
 `HybridRrfStrategy` 在 train 集上优于两条单路。**test 集现在还不要跑。**

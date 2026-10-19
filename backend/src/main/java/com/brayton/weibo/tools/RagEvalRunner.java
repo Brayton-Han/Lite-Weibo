@@ -5,6 +5,7 @@ import com.brayton.weibo.eval.RetrievalMetrics;
 import com.brayton.weibo.repository.PostEmbeddingRepository;
 import com.brayton.weibo.repository.PostRepository;
 import com.brayton.weibo.repository.PostLexicalSearchRepository;
+import com.brayton.weibo.retrieval.HybridRrfStrategy;
 import com.brayton.weibo.retrieval.LikeStrategy;
 import com.brayton.weibo.retrieval.RetrievalStrategy;
 import com.brayton.weibo.retrieval.ScoredPost;
@@ -20,6 +21,7 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.core.annotation.Order;
 import org.springframework.core.env.Environment;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Component;
 
 import java.io.BufferedWriter;
@@ -45,10 +47,18 @@ import java.util.stream.Collectors;
  * <ul>
  *   <li>{@code EVAL_SPLIT}：{@code train}（默认）/ {@code test} / {@code all}。调参只看 train；
  *       test 留到最终报数，中途不跑</li>
- *   <li>{@code EVAL_STRATEGIES}：逗号分隔，默认 {@code like,tsrank,vector}</li>
+ *   <li>{@code EVAL_STRATEGIES}：逗号分隔，默认 {@code like,tsrank,vector}；可选 {@code rrf}</li>
  *   <li>{@code EVAL_K}：截断深度，默认 10</li>
  *   <li>{@code EVAL_EF_SEARCH}：向量路的 hnsw.ef_search，默认取 {@code embedding.search.ef-search}</li>
+ *   <li>{@code EVAL_LATENCY_REPEAT}：每条 query 计时的次数，取中位数，默认 1；量延迟时调大</li>
+ *   <li>{@code EVAL_STRATEGIES} 里的 {@code rrf-serial}：与 rrf 相同但两路串行，用来量并行的收益</li>
+ *   <li>{@code EVAL_RRF_W}：rrf 向量一路的权重（词面一路为 1），默认 10；1 即等权 RRF</li>
+ *   <li>扫参：{@code EVAL_EF_SEARCH} / {@code EVAL_RRF_N} / {@code EVAL_RRF_K} / {@code EVAL_RRF_W} 都可写成逗号分隔的多个值，vector 按 ef_search、
+ *       rrf 按四者的笛卡尔积各展开成一个策略（名字如 {@code rrf-k60-n50-ef100-w2}），结果写到 {@code eval/results/sweep_{split}_{时间戳}/}，
+ *       汇总改为每个配置一行</li>
  *   <li>{@code EVAL_TRGM_THRESHOLD}：tsrank 中文路的 word_similarity 下限，默认取 {@code search.trgm.threshold}</li>
+ *   <li>{@code EVAL_RRF_N} / {@code EVAL_RRF_K}：rrf 策略每路召回条数（默认 20）与平滑常数（默认 10），默认值为 Day 11 选定配置；
+ *       两路就是 tsrank 与 vector，上面两个参数同样作用于它</li>
  *   <li>{@code EVAL_DIR}：默认 {@code ../eval}</li>
  * </ul>
  *
@@ -105,6 +115,8 @@ public class RagEvalRunner implements CommandLineRunner {
     private final EmbeddingClient embeddingClient;
     private final Environment environment;
     private final PostLexicalSearchRepository lexicalRepository;
+    /** rrf 两路并行用的线程池；同类型的 bean 有两个，按参数名匹配 {@link com.brayton.weibo.config.AsyncConfig#FEED_EXECUTOR} */
+    private final ThreadPoolTaskExecutor feedTaskExecutor;
     private final ObjectMapper mapper = new ObjectMapper();
 
     @Override
@@ -115,11 +127,22 @@ public class RagEvalRunner implements CommandLineRunner {
         Path evalDir = Path.of(env("EVAL_DIR", "../eval"));
         String split = env("EVAL_SPLIT", "train");
         int k = Integer.parseInt(env("EVAL_K", "10"));
-        int efSearch = Integer.parseInt(env("EVAL_EF_SEARCH", environment.getProperty("embedding.search.ef-search", "100")));
+        List<Integer> efSearches = ints(env("EVAL_EF_SEARCH", environment.getProperty("embedding.search.ef-search", "100")));
         // 中文 trgm 路的 word_similarity 下限；默认取线上配置，见 PostLexicalSearchRepository
         double trgmThreshold = Double.parseDouble(env("EVAL_TRGM_THRESHOLD", environment.getProperty("search.trgm.threshold", "0.05")));
         List<String> names = Arrays.stream(env("EVAL_STRATEGIES", "like,tsrank,vector").split(","))
                 .map(String::strip).filter(s -> !s.isEmpty()).toList();
+        // 默认值是 Day 11 在 train 上选定的配置（docs/EVAL.md「Day 11 · 加权 RRF」）；向量一路的权重，词面一路固定为 1
+        List<Integer> rrfNs = ints(env("EVAL_RRF_N", "20"));
+        List<Integer> rrfKs = ints(env("EVAL_RRF_K", "10"));
+        List<Double> rrfWs = Arrays.stream(env("EVAL_RRF_W", "10").split(",")).map(String::strip)
+                .filter(v -> !v.isEmpty()).map(Double::parseDouble).toList();
+        int latencyRepeat = Integer.parseInt(env("EVAL_LATENCY_REPEAT", "1"));
+        if (latencyRepeat < 1) {
+            throw new IllegalArgumentException("EVAL_LATENCY_REPEAT 至少为 1");
+        }
+        // 任一参数给了多个值就是扫参：策略名带上参数，汇总改成每个配置一行
+        boolean sweep = efSearches.size() > 1 || rrfNs.size() > 1 || rrfKs.size() > 1 || rrfWs.size() > 1;
 
         List<EvalQuery> queries = loadQueries(evalDir, split, loadJudged(evalDir));
         Set<Long> corpus = new HashSet<>(jdbc.queryForList(CORPUS_POSTS, Long.class, PostEmbeddingRepository.VISIBILITY_PUBLIC));
@@ -129,19 +152,45 @@ public class RagEvalRunner implements CommandLineRunner {
 
         List<RetrievalStrategy> strategies = new ArrayList<>();
         for (String name : names) {
-            strategies.add(switch (name) {
-                case "like" -> new LikeStrategy(postRepository);
-                case "tsrank" -> new TsRankStrategy(lexicalRepository, trgmThreshold);
+            switch (name) {
+                case "like" -> strategies.add(new LikeStrategy(postRepository));
+                case "tsrank" -> strategies.add(new TsRankStrategy(lexicalRepository, trgmThreshold));
                 case "vector" -> {
                     Map<String, float[]> vectors = queryVectors(evalDir, queries);
-                    yield new VectorStrategy(embeddingRepository, embeddingClient.modelId(), vectors::get, efSearch);
+                    for (int ef : efSearches) {
+                        RetrievalStrategy v = new VectorStrategy(embeddingRepository, embeddingClient.modelId(), vectors::get, ef);
+                        strategies.add(sweep ? named("vector-ef" + ef, v) : v);
+                    }
                 }
-                default -> throw new IllegalArgumentException("未知策略 " + name + "，可选 like / tsrank / vector");
-            });
+                case "rrf", "rrf-serial" -> {
+                    // rrf-serial 两路在调用线程上依次执行，只用来量并行省了多少时间，指标与 rrf 相同
+                    java.util.concurrent.Executor executor = name.equals("rrf") ? feedTaskExecutor : Runnable::run;
+                    Map<String, float[]> vectors = queryVectors(evalDir, queries);
+                    for (int ef : efSearches) {
+                        for (int n : rrfNs) {
+                            for (int rrfK : rrfKs) {
+                                for (double w : rrfWs) {
+                                    RetrievalStrategy r = new HybridRrfStrategy(
+                                            new TsRankStrategy(lexicalRepository, trgmThreshold),
+                                            new VectorStrategy(embeddingRepository, embeddingClient.modelId(), vectors::get, ef),
+                                            executor, n, rrfK, w);
+                                    strategies.add(sweep ? named(name + "-k" + rrfK + "-n" + n + "-ef" + ef + "-w" + fmtWeight(w), r)
+                                            : named(name, r));
+                                }
+                            }
+                        }
+                    }
+                }
+                default -> throw new IllegalArgumentException("未知策略 " + name + "，可选 like / tsrank / vector / rrf / rrf-serial");
+            }
         }
 
         String ts = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"));
+        // 扫参一次几十个策略，逐 query 明细单独放一个目录，不和单次运行的结果混在一起
         Path outDir = evalDir.resolve("results");
+        if (sweep) {
+            outDir = outDir.resolve("sweep_" + split + "_" + ts);
+        }
         Files.createDirectories(outDir);
 
         Map<String, List<QueryResult>> all = new LinkedHashMap<>();
@@ -152,27 +201,33 @@ public class RagEvalRunner implements CommandLineRunner {
             }
             List<QueryResult> results = new ArrayList<>(queries.size());
             for (EvalQuery q : queries) {
-                // 计时只量一次深度为 k 的调用，与线上一致；剔除非语料帖所需的加深重取是评测自己的开销，不算进去
-                long t0 = System.nanoTime();
-                s.retrieve(q.query(), k, null);
-                long nanos = System.nanoTime() - t0;
+                // 计时只量深度为 k 的调用，与线上一致；剔除非语料帖所需的加深重取是评测自己的开销，不算进去。
+                // 重复 latencyRepeat 次取中位数，压掉单次测量的抖动（GC、调度），分位数反映的是 query 之间的差异
+                long[] samples = new long[latencyRepeat];
+                for (int i = 0; i < latencyRepeat; i++) {
+                    long t0 = System.nanoTime();
+                    s.retrieve(q.query(), k, null);
+                    samples[i] = System.nanoTime() - t0;
+                }
+                Arrays.sort(samples);
+                long nanos = samples[(latencyRepeat - 1) / 2];
                 List<ScoredPost> raw = retrieveCorpusTopK(s, q.query(), k, corpus);
                 results.add(score(q, raw, corpus, k, nanos));
             }
             all.put(s.name(), results);
             Path tsv = outDir.resolve(s.name() + "_" + split + "_" + ts + ".tsv");
             writeTsv(tsv, results);
-            System.out.printf("   %-8s 完成 → %s%n", s.name(), tsv.normalize());
+            System.out.printf("   %-20s 完成 → %s%n", s.name(), tsv.normalize());
         }
 
         String header = String.format("""
                 # 检索评测 · %s · %s
 
-                - split = `%s`（%d 条 query），k = %d，ef_search = %d，trgm 阈值 = %s，embedding = `%s`
+                - split = `%s`（%d 条 query），k = %d，ef_search = %s，trgm 阈值 = %s，rrf N = %s、k = %s、向量权重 = %s，embedding = `%s`
                 - 只在语料帖（%d 条）中排名；非语料帖 %d 条从结果中剔除
-                - 向量路延迟不含 embedding API 调用（query 向量走缓存）
-                """, split, ts, split, queries.size(), k, efSearch, trgmThreshold, embeddingClient.modelId(), corpus.size(), nonCorpus);
-        String summary = header + "\n" + summarize(all, k);
+                - 向量路延迟不含 embedding API 调用（query 向量走缓存）；每条 query 计时 %d 次取中位数
+                """, split, ts, split, queries.size(), k, efSearches, trgmThreshold, rrfNs, rrfKs, rrfWs, embeddingClient.modelId(), corpus.size(), nonCorpus, latencyRepeat);
+        String summary = header + "\n" + (sweep ? summarizeSweep(all, k) : summarize(all, k));
         Path md = outDir.resolve("summary_" + split + "_" + ts + ".md");
         Files.writeString(md, summary, StandardCharsets.UTF_8);
         System.out.println();
@@ -278,6 +333,36 @@ public class RagEvalRunner implements CommandLineRunner {
             }
             sb.append(" |\n");
         }
+        return sb.toString();
+    }
+
+    /**
+     * 扫参汇总：每个策略一行，总体四项指标 + judged + 延迟 + 各分组 nDCG。
+     * 几十个策略时按层 × 类型的宽表（每策略一列）没法读，这里转置成每策略一行；行序即配置顺序，不排序。
+     */
+    static String summarizeSweep(Map<String, List<QueryResult>> all, int k) {
+        LinkedHashMap<String, Predicate<EvalQuery>> groups = new LinkedHashMap<>();
+        for (String type : TYPES.subList(0, 3)) {
+            groups.put(type, q -> "experience".equals(q.layer()) && type.equals(q.type()));
+        }
+        groups.put("共鸣层", q -> "resonance".equals(q.layer()));
+
+        StringBuilder sb = new StringBuilder("## 扫参（可答 query，宏平均）\n\n");
+        sb.append(String.format("| 策略 | Recall@%d | P@%d | MRR | nDCG@%d | judged@%d | p50 ms | p95 ms", k, k, k, k));
+        groups.keySet().forEach(g -> sb.append(" | nDCG ").append(g));
+        sb.append(" |\n|---|---|---|---|---|---|---|---|").append("---|".repeat(groups.size())).append("\n");
+        all.forEach((name, rs) -> {
+            List<QueryResult> answerable = rs.stream().filter(r -> !r.query().isNoAnswer()).toList();
+            List<Long> latencies = rs.stream().map(QueryResult::nanos).toList();
+            sb.append(String.format("| %s | %s | %s | %s | %s | %s | %.1f | %.1f", name,
+                    fmt(mean(answerable, QueryResult::recall)), fmt(mean(answerable, QueryResult::precision)),
+                    fmt(mean(answerable, QueryResult::rr)), fmt(mean(answerable, QueryResult::ndcg)),
+                    judgedRate(rs), percentile(latencies, 50) / 1e6, percentile(latencies, 95) / 1e6));
+            groups.values().forEach(g -> sb.append(" | ").append(fmt(mean(
+                    answerable.stream().filter(r -> g.test(r.query())).toList(), QueryResult::ndcg))));
+            sb.append(" |\n");
+        });
+        sb.append("\n分组 nDCG 的前三列是经验层的三类 query。judged@k 与延迟按全部 query（含无答案）统计。\n");
         return sb.toString();
     }
 
@@ -435,6 +520,25 @@ public class RagEvalRunner implements CommandLineRunner {
 
     private static String cell(Double v) {
         return v == null ? "" : String.format("%.4f", v);
+    }
+
+    /** 扫参时策略名要带上参数，结果文件与汇总表才分得开。 */
+    private static RetrievalStrategy named(String name, RetrievalStrategy inner) {
+        return new RetrievalStrategy() {
+            public String name() { return name; }
+            public List<ScoredPost> retrieve(String query, int k, Long requesterId) {
+                return inner.retrieve(query, k, requesterId);
+            }
+        };
+    }
+
+    /** 1.0 → "1"，1.5 → "1.5"：策略名里不出现多余的 ".0"。 */
+    static String fmtWeight(double w) {
+        return w == Math.rint(w) ? String.valueOf((long) w) : String.valueOf(w);
+    }
+
+    private static List<Integer> ints(String csv) {
+        return Arrays.stream(csv.split(",")).map(String::strip).filter(v -> !v.isEmpty()).map(Integer::parseInt).toList();
     }
 
     private static String env(String name, String fallback) {
