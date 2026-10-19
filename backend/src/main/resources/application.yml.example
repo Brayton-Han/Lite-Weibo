@@ -53,6 +53,12 @@ r2:
 #   search:
 #     ef-search: 100        # HNSW 查询候选队列，越大召回越高、越慢（pgvector 默认 40）
 
+# 重排（可选，以下均为默认值）。与 embedding 共用 VOYAGE_API_KEY 与 base-url。
+# rerank:
+#   voyage:
+#     model: rerank-3       # 或 rerank-3-lite（更快更便宜）
+#     timeout-ms: 2000      # 搜索请求里的读超时；超时或失败降级为第一阶段排序
+
 # ─────────────────────────────────────────────────────────────
 # 用法：cp application.yml.example application.yml，填入真实值。
 #

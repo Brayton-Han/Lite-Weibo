@@ -1,12 +1,17 @@
 package com.brayton.weibo.tools;
 
 import com.brayton.weibo.embedding.EmbeddingClient;
+import com.brayton.weibo.entity.Post;
 import com.brayton.weibo.eval.RetrievalMetrics;
 import com.brayton.weibo.repository.PostEmbeddingRepository;
 import com.brayton.weibo.repository.PostRepository;
 import com.brayton.weibo.repository.PostLexicalSearchRepository;
+import com.brayton.weibo.rerank.RerankCandidate;
+import com.brayton.weibo.rerank.Reranker;
+import com.brayton.weibo.rerank.VoyageReranker;
 import com.brayton.weibo.retrieval.HybridRrfStrategy;
 import com.brayton.weibo.retrieval.LikeStrategy;
+import com.brayton.weibo.retrieval.RerankStrategy;
 import com.brayton.weibo.retrieval.RetrievalStrategy;
 import com.brayton.weibo.retrieval.ScoredPost;
 import com.brayton.weibo.retrieval.TsRankStrategy;
@@ -59,6 +64,9 @@ import java.util.stream.Collectors;
  *   <li>{@code EVAL_TRGM_THRESHOLD}：tsrank 中文路的 word_similarity 下限，默认取 {@code search.trgm.threshold}</li>
  *   <li>{@code EVAL_RRF_N} / {@code EVAL_RRF_K}：rrf 策略每路召回条数（默认 20）与平滑常数（默认 10），默认值为 Day 11 选定配置；
  *       两路就是 tsrank 与 vector，上面两个参数同样作用于它</li>
+ *   <li>{@code EVAL_STRATEGIES} 里的 {@code rerank-voyage} / {@code rerank-voyage-lite}：在 rrf 之上加 Voyage rerank
+ *       （{@code rerank-3} / {@code rerank-3-lite}）。base 就是上面那组 rrf 参数，所以这时 rrf 参数与 ef_search 只能各给一个值</li>
+ *   <li>{@code EVAL_RERANK_N}：送进 reranker 的候选深度，默认 30；可逗号分隔扫参（策略名如 {@code rerank-voyage-n50}）</li>
  *   <li>{@code EVAL_DIR}：默认 {@code ../eval}</li>
  * </ul>
  *
@@ -82,6 +90,13 @@ import java.util.stream.Collectors;
  * 没进 Day 8 候选池的帖子没有标注，算分时一律当不相关。三条基线都是候选池的来源（池深 20 ≥ k），
  * 覆盖率应接近 100%；之后的混合 / rerank 会把池外的帖子排上来，覆盖率掉得多，说明指标在低估它——
  * 这时要补标而不是直接信数字。所以汇总里每个策略都报 judged@k。
+ *
+ * <h3>rerank 策略</h3>
+ * 每次调用都打 Voyage API、按 token 计费，所以和本地策略的跑法不同（见 {@link RerankProbe}）：
+ * 不做逐条预热，只用第一条 query 预热一次连接；计时固定 1 次，不受 {@code EVAL_LATENCY_REPEAT} 影响；
+ * 计时那次的结果按 (query, 候选, k) 缓存，紧接着的打分直接复用，只有剔除非语料帖后的加深重取才再打 API。
+ * 延迟<b>含</b> rerank 的网络往返（这正是要量的），仍不含 query 向量化。reranker 失败直接让评测失败，不降级。
+ * 汇总末尾单独报 token 用量与按官网单价估算的单次成本。
  *
  * <h3>无答案 query</h3>
  * Recall / nDCG 对它们没有定义（{@link RetrievalMetrics} 直接抛异常），不进均值，
@@ -117,6 +132,8 @@ public class RagEvalRunner implements CommandLineRunner {
     private final PostLexicalSearchRepository lexicalRepository;
     /** rrf 两路并行用的线程池；同类型的 bean 有两个，按参数名匹配 {@link com.brayton.weibo.config.AsyncConfig#FEED_EXECUTOR} */
     private final ThreadPoolTaskExecutor feedTaskExecutor;
+    /** 只用来拿 key 与地址：评测按模型各开一个 {@link VoyageReranker#offline} 实例 */
+    private final VoyageReranker voyageReranker;
     private final ObjectMapper mapper = new ObjectMapper();
 
     @Override
@@ -137,12 +154,14 @@ public class RagEvalRunner implements CommandLineRunner {
         List<Integer> rrfKs = ints(env("EVAL_RRF_K", "10"));
         List<Double> rrfWs = Arrays.stream(env("EVAL_RRF_W", "10").split(",")).map(String::strip)
                 .filter(v -> !v.isEmpty()).map(Double::parseDouble).toList();
+        List<Integer> rerankNs = ints(env("EVAL_RERANK_N", "30"));
         int latencyRepeat = Integer.parseInt(env("EVAL_LATENCY_REPEAT", "1"));
         if (latencyRepeat < 1) {
             throw new IllegalArgumentException("EVAL_LATENCY_REPEAT 至少为 1");
         }
         // 任一参数给了多个值就是扫参：策略名带上参数，汇总改成每个配置一行
-        boolean sweep = efSearches.size() > 1 || rrfNs.size() > 1 || rrfKs.size() > 1 || rrfWs.size() > 1;
+        boolean sweep = efSearches.size() > 1 || rrfNs.size() > 1 || rrfKs.size() > 1 || rrfWs.size() > 1
+                || rerankNs.size() > 1;
 
         List<EvalQuery> queries = loadQueries(evalDir, split, loadJudged(evalDir));
         Set<Long> corpus = new HashSet<>(jdbc.queryForList(CORPUS_POSTS, Long.class, PostEmbeddingRepository.VISIBILITY_PUBLIC));
@@ -151,6 +170,7 @@ public class RagEvalRunner implements CommandLineRunner {
                 split, queries.size(), corpus.size(), nonCorpus);
 
         List<RetrievalStrategy> strategies = new ArrayList<>();
+        Map<String, RerankProbe> rerankProbes = new HashMap<>();
         for (String name : names) {
             switch (name) {
                 case "like" -> strategies.add(new LikeStrategy(postRepository));
@@ -181,7 +201,26 @@ public class RagEvalRunner implements CommandLineRunner {
                         }
                     }
                 }
-                default -> throw new IllegalArgumentException("未知策略 " + name + "，可选 like / tsrank / vector / rrf / rrf-serial");
+                case "rerank-voyage", "rerank-voyage-lite" -> {
+                    if (efSearches.size() > 1 || rrfNs.size() > 1 || rrfKs.size() > 1 || rrfWs.size() > 1) {
+                        throw new IllegalArgumentException(name + " 的 base 是单一 rrf 配置，ef_search / rrf 参数不能同时扫");
+                    }
+                    String model = name.endsWith("-lite") ? VoyageReranker.LITE_MODEL : VoyageReranker.DEFAULT_MODEL;
+                    Map<String, float[]> vectors = queryVectors(evalDir, queries);
+                    for (int n : rerankNs) {
+                        RetrievalStrategy rrf = new HybridRrfStrategy(
+                                new TsRankStrategy(lexicalRepository, trgmThreshold),
+                                new VectorStrategy(embeddingRepository, embeddingClient.modelId(), vectors::get, efSearches.get(0)),
+                                feedTaskExecutor, rrfNs.get(0), rrfKs.get(0), rrfWs.get(0));
+                        VoyageReranker client = voyageReranker.offline(model);
+                        MemoReranker memo = new MemoReranker(client);
+                        String strategyName = sweep ? name + "-n" + n : name;
+                        strategies.add(named(strategyName, new RerankStrategy(rrf, memo, this::postTexts, n, false)));
+                        rerankProbes.put(strategyName, new RerankProbe(client, memo, n));
+                    }
+                }
+                default -> throw new IllegalArgumentException("未知策略 " + name
+                        + "，可选 like / tsrank / vector / rrf / rrf-serial / rerank-voyage / rerank-voyage-lite");
             }
         }
 
@@ -194,25 +233,42 @@ public class RagEvalRunner implements CommandLineRunner {
         Files.createDirectories(outDir);
 
         Map<String, List<QueryResult>> all = new LinkedHashMap<>();
+        Map<String, Long> rerankTokens = new LinkedHashMap<>();
         for (RetrievalStrategy s : strategies) {
-            // 先空跑一遍预热（JIT、连接池、PG 缓冲区），再计时的那一遍才算数
-            for (EvalQuery q : queries) {
-                retrieveCorpusTopK(s, q.query(), k, corpus);
+            RerankProbe probe = rerankProbes.get(s.name());
+            if (probe == null) {
+                // 先空跑一遍预热（JIT、连接池、PG 缓冲区），再计时的那一遍才算数
+                for (EvalQuery q : queries) {
+                    retrieveCorpusTopK(s, q.query(), k, corpus);
+                }
+            } else if (!queries.isEmpty()) {
+                // rerank 每次调用都计费：只拿第一条预热一次连接，再清掉缓存，保证计时那次真的打到 API
+                s.retrieve(queries.get(0).query(), k, null);
+                probe.memo().clear();
             }
+            int repeat = probe == null ? latencyRepeat : 1;
+            long timedTokens = 0;
             List<QueryResult> results = new ArrayList<>(queries.size());
             for (EvalQuery q : queries) {
                 // 计时只量深度为 k 的调用，与线上一致；剔除非语料帖所需的加深重取是评测自己的开销，不算进去。
-                // 重复 latencyRepeat 次取中位数，压掉单次测量的抖动（GC、调度），分位数反映的是 query 之间的差异
-                long[] samples = new long[latencyRepeat];
-                for (int i = 0; i < latencyRepeat; i++) {
+                // 重复 repeat 次取中位数，压掉单次测量的抖动（GC、调度），分位数反映的是 query 之间的差异
+                long tokensBefore = probe == null ? 0 : probe.client().totalTokens();
+                long[] samples = new long[repeat];
+                for (int i = 0; i < repeat; i++) {
                     long t0 = System.nanoTime();
                     s.retrieve(q.query(), k, null);
                     samples[i] = System.nanoTime() - t0;
                 }
+                if (probe != null) {
+                    timedTokens += probe.client().totalTokens() - tokensBefore;
+                }
                 Arrays.sort(samples);
-                long nanos = samples[(latencyRepeat - 1) / 2];
+                long nanos = samples[(repeat - 1) / 2];
                 List<ScoredPost> raw = retrieveCorpusTopK(s, q.query(), k, corpus);
                 results.add(score(q, raw, corpus, k, nanos));
+            }
+            if (probe != null) {
+                rerankTokens.put(s.name(), timedTokens);
             }
             all.put(s.name(), results);
             Path tsv = outDir.resolve(s.name() + "_" + split + "_" + ts + ".tsv");
@@ -227,7 +283,11 @@ public class RagEvalRunner implements CommandLineRunner {
                 - 只在语料帖（%d 条）中排名；非语料帖 %d 条从结果中剔除
                 - 向量路延迟不含 embedding API 调用（query 向量走缓存）；每条 query 计时 %d 次取中位数
                 """, split, ts, split, queries.size(), k, efSearches, trgmThreshold, rrfNs, rrfKs, rrfWs, embeddingClient.modelId(), corpus.size(), nonCorpus, latencyRepeat);
-        String summary = header + "\n" + (sweep ? summarizeSweep(all, k) : summarize(all, k));
+        if (!rerankProbes.isEmpty()) {
+            header += "- rerank 策略：计时固定 1 次、含 Voyage API 往返；base 为上面那组 rrf 参数，失败不降级\n";
+        }
+        String summary = header + "\n" + (sweep ? summarizeSweep(all, k) : summarize(all, k))
+                + (rerankProbes.isEmpty() ? "" : summarizeRerankUsage(rerankProbes, rerankTokens, queries.size()));
         Path md = outDir.resolve("summary_" + split + "_" + ts + ".md");
         Files.writeString(md, summary, StandardCharsets.UTF_8);
         System.out.println();
@@ -363,6 +423,28 @@ public class RagEvalRunner implements CommandLineRunner {
             sb.append(" |\n");
         });
         sb.append("\n分组 nDCG 的前三列是经验层的三类 query。judged@k 与延迟按全部 query（含无答案）统计。\n");
+        return sb.toString();
+    }
+
+    /** Voyage 官网单价（美元 / 百万 token，2026-10 查自 docs.voyageai.com/docs/pricing）；只用于估算，不进账单。 */
+    private static final Map<String, Double> RERANK_PRICE_PER_MTOK = Map.of(
+            "voyage/" + VoyageReranker.DEFAULT_MODEL, 0.05,
+            "voyage/" + VoyageReranker.LITE_MODEL, 0.02);
+
+    /** 只统计计时那一次调用的 token：线上每次搜索恰好调一次，评测自己的加深重取不算。 */
+    static String summarizeRerankUsage(Map<String, RerankProbe> probes, Map<String, Long> tokens, int queryCount) {
+        StringBuilder sb = new StringBuilder("\n## Rerank 用量\n\n");
+        sb.append("| 策略 | 模型 | 候选 N | 总 token | 平均 token / query | 估算成本 / query（美元） |\n");
+        sb.append("|---|---|---|---|---|---|\n");
+        tokens.forEach((name, total) -> {
+            RerankProbe p = probes.get(name);
+            String model = p.client().modelId();
+            double avg = queryCount == 0 ? 0 : (double) total / queryCount;
+            Double price = RERANK_PRICE_PER_MTOK.get(model);
+            sb.append(String.format("| %s | `%s` | %d | %d | %.0f | %s |%n", name, model, p.n(), total, avg,
+                    price == null ? "—" : String.format("%.7f", avg * price / 1e6)));
+        });
+        sb.append("\n计费 token = query token × 候选数 + 候选 token 之和；成本按官网单价估算，未扣免费额度。\n");
         return sb.toString();
     }
 
@@ -522,6 +604,15 @@ public class RagEvalRunner implements CommandLineRunner {
         return v == null ? "" : String.format("%.4f", v);
     }
 
+    /** rerank 候选的正文：一次 findAllById（实体上的 @Where 已滤掉软删除的帖子）。 */
+    private Map<Long, String> postTexts(Collection<Long> ids) {
+        Map<Long, String> out = new HashMap<>();
+        for (Post p : postRepository.findAllById(ids)) {
+            out.put(p.getId(), p.getContent());
+        }
+        return out;
+    }
+
     /** 扫参时策略名要带上参数，结果文件与汇总表才分得开。 */
     private static RetrievalStrategy named(String name, RetrievalStrategy inner) {
         return new RetrievalStrategy() {
@@ -553,6 +644,44 @@ public class RagEvalRunner implements CommandLineRunner {
     record EvalQuery(String qid, String query, String type, String layer, Map<Long, Integer> grades, Set<Long> judged) {
         boolean isNoAnswer() {
             return RetrievalMetrics.relevantSet(grades).isEmpty();
+        }
+    }
+
+    /** 一个 rerank 策略的评测探针：client 记 token，memo 让打分复用计时那次的结果。 */
+    record RerankProbe(VoyageReranker client, MemoReranker memo, int n) {}
+
+    /**
+     * 按 (k, query, 候选 id 序列) 缓存重排结果。计时那次调用之后，打分的那次（同 query、同深度 k）直接命中，
+     * 不重复计费；候选不同（加深重取）就是不同的 key，照常打 API。评测单线程，用 HashMap 即可。
+     */
+    static final class MemoReranker implements Reranker {
+        private final Reranker inner;
+        private final Map<String, List<ScoredPost>> cache = new HashMap<>();
+
+        MemoReranker(Reranker inner) {
+            this.inner = inner;
+        }
+
+        @Override
+        public List<ScoredPost> rerank(String query, List<RerankCandidate> candidates, int k) {
+            String key = k + "\u0000" + query + "\u0000"
+                    + candidates.stream().map(c -> String.valueOf(c.postId())).collect(Collectors.joining(","));
+            List<ScoredPost> hit = cache.get(key);
+            if (hit != null) {
+                return hit;
+            }
+            List<ScoredPost> out = inner.rerank(query, candidates, k);
+            cache.put(key, out);
+            return out;
+        }
+
+        @Override
+        public String modelId() {
+            return inner.modelId();
+        }
+
+        void clear() {
+            cache.clear();
         }
     }
 

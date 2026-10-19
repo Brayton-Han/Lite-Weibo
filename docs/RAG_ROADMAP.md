@@ -102,7 +102,7 @@
 | 词面检索 | 英文 `tsvector` + 中文 `pg_trgm` | 复用项目已有的中英双路判断（`ChineseUtil`） | "中文没有天然分词，`to_tsvector('simple')` 对中文无效，所以走 trigram" |
 | 融合 | **RRF**（Reciprocal Rank Fusion） | 不需要归一化两路异构分数，鲁棒、无需调权重 | "分数融合要处理量纲，排名融合不用——这是 RRF 相对加权求和的核心优势" |
 | 生成 | **Claude Sonnet 5**（`claude-sonnet-5`） | 质量/成本平衡；citations 原生支持 | |
-| rerank 判断 | **Claude Haiku 4.5** / Sonnet 5 | 便宜；listwise 重排 | |
+| rerank | **Voyage `rerank-3`**（cross-encoder，托管 API；`rerank-3-lite` 对照） | 复用 embedding 的 key 与 REST 写法，不用自部署模型；见 §Day 12 | "先量 Recall@N 天花板，再判断 rerank 值不值" |
 | Java SDK | **`com.anthropic:anthropic-java`** 官方 SDK | 不引 LangChain4j/Spring AI——抽象会挡住 cache 断点、citations、effort 等关键参数 | 见 §附录 C |
 
 **价格参考**（每 100 万 token，输入/输出）：
@@ -1084,35 +1084,101 @@ D: 0        + 1/(60+2) = 0.01613
 ## Day 12 · Rerank（并诚实评估它是否值得）
 
 ### 🎯 今日目标
-加一层重排，**并用数据判断它值不值**。
+在 Day 11 固定的 `rrf` 之上加一层 **Voyage rerank**（cross-encoder，托管 API），**用数据判断它值不值**。
 
 ### 📚 学习（约 1h）
 
-- **为什么需要 rerank**：第一阶段检索为了速度用的是"向量点积"这种粗粒度相似度，
-  无法理解 query 和文档之间的细粒度关系。rerank 用更贵的模型对 top-50 精排成 top-10。
-- **两种方式**：
-  - **Cross-encoder**（如 bge-reranker）：query 和 doc 一起进模型，质量高，但要再部署一个模型
-  - **LLM listwise rerank**：把 top-N 一次性给 LLM，让它输出排序。简单，但有成本和延迟
-- **代价**：多一次模型调用 = +几百 ms 延迟 + 成本。**必须用数据证明它值得**。
+- **为什么需要 rerank**：第一阶段是 bi-encoder——query 和帖子**各自**编码成向量再算点积，
+  帖子向量离线算好，所以快，但两边在编码时互相看不见，细粒度的关系（否定、主语是谁、"不是 A 而是 B"）会丢。
+  rerank 用更贵的模型只对 top-N 候选精排。
+- **Cross-encoder**：query 和帖子拼在一起进同一个 Transformer，每层 attention 都能看到两边，输出一个相关性分（pointwise）。
+  质量高，但每个候选都要过一次模型，没法离线预算，所以只能用在小候选集上。
+- **为什么用 Voyage 而不是自部署 bge-reranker**：embedding 已经是 Voyage，复用同一个 key 和 REST 写法；
+  不用维护一个 1GB+ 的模型服务（bge 的 TEI 镜像在 Apple Silicon 上只能模拟运行）。代价是多一次外部 API 往返，以及按 token 计费。
+- **为什么不用 LLM listwise rerank**：按 token 计费更贵、延迟更高、输出不完全确定，还有位置偏差；
+  cross-encoder 的分数可复现，更适合放在搜索框后面。
+- **重排的天花板**：rerank 只能重排候选，不能找回没召回的帖子。**Recall@N（候选深度）就是重排后 Recall@10 的上限**。
+- **跟 Day 11 结论的关系**：`rrf` 目前约等于"向量 + 词面 tie-breaker"，nDCG@10 已经 0.771、MRR 0.956。
+  头部已经很准，rerank 的空间主要在 2–10 名的顺序，以及 top-10 之外、top-N 之内的相关帖子——**先按 query 看清空间在哪，别默认能涨**。
+
+**Voyage rerank API**（`POST https://api.voyageai.com/v1/rerank`）：
+```
+请求：{ "query": "...", "documents": ["...", ...], "model": "rerank-3",
+        "top_k": 10, "return_documents": false, "truncation": true }
+响应：{ "data": [ { "index": 3, "relevance_score": 0.91 }, ... ],   ← 已按分数降序；index 是 documents 里的下标
+        "model": "rerank-3", "usage": { "total_tokens": 1234 } }
+```
+- 模型：`rerank-3`（最准）/ `rerank-3-lite`（更快更便宜）；单请求最多 1000 条，单条 query + doc ≤ 32K token
+- 计费 token = query token × 候选数 + 所有候选 token 之和——**query 会按候选数重复计费**，N 翻倍成本也翻倍
+- 价格：`rerank-3` $0.05 / 百万 token，`rerank-3-lite` $0.02，前 2 亿 token 免费（2026-10 查自官网 pricing 页）
 
 ### 🛠 开发 checklist
 
-- [ ] 实现 `LlmRerankStrategy`：包装 `HybridRrfStrategy`，取 top-30 送给 `claude-haiku-4-5` 重排
-- [ ] Prompt 要求**只输出 id 排序**，用 structured outputs（`output_config.format`）约束格式，不要自由文本
-- [ ] 跑 eval，对比：nDCG 提升多少？延迟增加多少？每次查询成本多少？
-- [ ] **做决定并记录理由**：
-  - 如果 nDCG 提升 < 3% 而延迟翻倍 → **不上，写进 DESIGN.md 说明为什么不上**
-  - 如果提升明显 → 上，但考虑只对"长 query / 口语化提问"启用
-- [ ] 试试 Sonnet 5 重排，对比 Haiku 的质量差距是否值得 2 倍价钱
+- [x] 抽一个 `Reranker` 接口：`List<ScoredPost> rerank(String query, List<RerankCandidate> candidates, int k)`，
+  `RerankCandidate` 带 postId 和正文；跟 `EmbeddingClient` 一样用接口隔离，以后想加自部署 bge 做对照不用改上层
+  - 放在 `com.brayton.weibo.rerank` 包，失败统一抛 `RerankException`
+- [x] 实现 `VoyageReranker`：照 `VoyageEmbeddingClient` 的写法（`RestClient`、key 只从 `VOYAGE_API_KEY` 读、缺 key 照常启动）
+  - 模型从配置读（`rerank.voyage.model`，默认 `rerank-3`）；评测按策略名选模型，`offline(model)` 另开实例（429 退避重试、读超时 30s）
+  - 响应校验：条数必须等于 `min(k, 候选数)`，index 越界或重复直接报错；同分按输入下标（第一阶段名次）打破平局
+  - `top_k` 传 k，`return_documents=false`，按返回的 `index` 映射回 postId；`relevance_score` 直接放进 `ScoredPost.score`
+  - **走查询路径的快速失败**：跟 `embedQuery` 一样不重试 429，5xx / 网络错误最多 2 次，超时建议 2s
+  - 从 `usage.total_tokens` 记录每次调用的 token 数
+- [x] 实现 `RerankStrategy implements RetrievalStrategy`：包装 base strategy（固定为 Day 11 的 `rrf` 配置），
+  取 top-N（默认 30，`EVAL_RERANK_N`）→ 批量取正文（一次 `findAllById`，不要 N+1）→ 交给 `Reranker` → 返回 top-k
+  - `name()`：`rerank-voyage`（lite 版 `rerank-voyage-lite`）
+  - k > N 时（评测加深重取）跟着加深 N，与 `HybridRrfStrategy` 的 `max(n, k)` 约定一致
+  - **降级**：reranker 超时或报错时返回 base 的原排序并打一条 warn——rerank 失败不能把搜索整个打挂
+  - 同分按 base 名次打破平局，输出确定
+  - 召回后被删的帖子丢掉；正文为空的帖子（纯图、纯转发）不送 reranker，按 base 名次补在重排结果之后
+- [x] `RagEvalRunner` 加上 `rerank-voyage` / `rerank-voyage-lite`；结果文件除 nDCG / MRR / Recall 外，再记**每条 query 的 rerank 耗时和 token 数**
+  - rerank 策略强制 `EVAL_LATENCY_REPEAT=1`（否则每条 query 调 21 次 API）
+  - 实际做法：rerank 策略只用第一条 query 预热一次连接；计时那次的结果按 (k, query, 候选) 缓存，紧接着的打分直接复用，
+    每条 query 只计费一次（剔除非语料帖的加深重取除外）。token 只统计计时那次，汇总末尾出「Rerank 用量」表（按官网单价估算成本）
+  - 评测里 reranker 失败**不降级**，直接让评测失败——静默降级会把 base 的结果混进指标
+  - `EVAL_RERANK_N` 可逗号分隔扫参；rerank 的 base 就是那组 rrf 参数，所以同时扫 rrf / ef_search 会直接报错
+- [x] 单测 `VoyageRerankerTest` / `RerankStrategyTest`：index 映射、降级、k > N 加深、同分打破（mock HTTP，不打真接口）
+  - `VoyageRerankerTest` 12 个、`RerankStrategyTest` 8 个；全量 `./mvnw test` 82 个通过（3 个需要 key / 数据库的跳过）
+
+**评测与决定**（只在 train 上跑；test 留到 Phase 6）
+- [x] 设好 `VOYAGE_API_KEY`，在 `backend/` 下跑一次：
+  ```
+  EVAL_RUN=true EVAL_STRATEGIES=rrf,rerank-voyage ./mvnw spring-boot:run -Dspring-boot.run.profiles=tools
+  ```
+  （成本可忽略：一次约 25 万 token，在免费额度内）
+  - 结果 `eval/results/summary_train_20261019-154131.md`，表与读数见 `docs/EVAL.md`「Day 12」
+- [x] 从汇总里填对比表（按语料层分开报：经验层 / 共鸣层）：
+
+  | 策略 | nDCG@10 | MRR | Recall@10 | judged@10 | p50 / p95 ms | 成本 / query |
+  |---|---|---|---|---|---|---|
+  | rrf（无 rerank） | 0.771 | 0.956 | 0.386 | 99.8% | 3.3 / 4.8 | $0 |
+  | rerank-voyage | 0.807 | 1.000 | 0.395 | 92.5% | 123 / 155 | $0.00009 |
+
+  - 分层 nDCG：经验层 0.737 → 0.774（keyword 0.657 → 0.713），共鸣层 0.835 → 0.869
+  - 配对 bootstrap：Δ nDCG +0.036，CI [+0.005, +0.068]，赢 / 平 / 输 23 / 4 / 8
+
+  - judged@10 明显低于 rrf 时要在表下注明：rerank 排上来的池外帖子按不相关计分，指标会偏低
+  - ⚠️ 实测 judged@10 92.5%（30 个未判定帖），rerank 的数字偏保守
+- [x] **做决定并记录理由**（先记在 `docs/EVAL.md`「Day 12 · 决定」，Day 18 写 DESIGN.md 时搬过去）：
+  - nDCG 提升 < 3%（约 +0.023）而延迟明显增加 → **不上**，保留实现和数据
+  - 提升明显 → 上
+  - **决定：上。** +4.7% 超过门槛且显著，成本约 $0.00009 / query；延迟 +120 ms 可接受，线上开降级（超时 2s 退回 rrf）
 
 ### ✅ 验收标准
-有一张三方对比表（无 rerank / Haiku rerank / Sonnet rerank），三列：nDCG、p95 延迟、单次成本。**并且你做了决定。**
+- `Reranker` 接口 + `VoyageReranker` 实现
+- 有上面那张有 / 无 rerank 的对比表
+- **做了决定**，写清理由
 
 ### 💬 面试钩子
+准备好回答："rerank 为什么选 Voyage，而不是自部署 bge 或者 LLM 重排？"
+> "rerank 我用的是 cross-encoder：query 和帖子一起过模型，比第一阶段的双塔点积能看到更细的关系，分数也可复现。
+> 选托管的 Voyage，是因为 embedding 已经在用它，不用多维护一个模型服务；LLM listwise 更贵、更慢、输出不确定，放在搜索框后面不合适。
+> 另外 rerank 只能重排候选，不能找回没召回的帖子，所以它的上限取决于第一阶段召回得好不好。"
+
 **"决定不上"也是一个好答案**，甚至比"什么都上了"更好：
-> "我实现了 LLM rerank，实测 nDCG 只提升 2.1%，但 p95 延迟从 180ms 涨到 890ms，
-> 每次查询多花 $0.0004。对一个搜索框来说这个交换不划算，所以我没上，
-> 但保留了实现和数据在 DESIGN.md 里——如果未来场景变成'低频高价值查询'，可以随时打开。"
+> "实测 rerank 在 nDCG 上提升 X，置信区间 [..]，p95 延迟从 Y 涨到 Z。
+> 第一阶段的头部已经很准（MRR 0.95），重排的空间本来就小，所以 ……（按实测结论填）。"
+
+⚠️ 数字一律按实测填，不要预设结论——Day 11 已经证明"直觉上会涨"的东西可能根本不涨。
 
 ---
 
