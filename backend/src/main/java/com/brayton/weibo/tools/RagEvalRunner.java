@@ -316,12 +316,18 @@ public class RagEvalRunner implements CommandLineRunner {
      * 单条 query 的打分：先剔除非语料帖并截断到 k，再算指标。无答案 query 只记返回条数与延迟。
      */
     static QueryResult score(EvalQuery q, List<ScoredPost> raw, Set<Long> corpus, int k, long nanos) {
-        List<Long> ranked = raw.stream().map(ScoredPost::postId).filter(corpus::contains).distinct().limit(k).toList();
+        List<ScoredPost> kept = new ArrayList<>(k);
+        Set<Long> seen = new HashSet<>();
+        for (ScoredPost p : raw) {
+            if (kept.size() < k && corpus.contains(p.postId()) && seen.add(p.postId())) kept.add(p);
+        }
+        List<Long> ranked = kept.stream().map(ScoredPost::postId).toList();
+        List<Double> scores = kept.stream().map(ScoredPost::score).toList();
         if (q.isNoAnswer()) {
-            return new QueryResult(q, ranked, nanos, null, null, null, null);
+            return new QueryResult(q, ranked, scores, nanos, null, null, null, null);
         }
         Set<Long> relevant = RetrievalMetrics.relevantSet(q.grades());
-        return new QueryResult(q, ranked, nanos,
+        return new QueryResult(q, ranked, scores, nanos,
                 RetrievalMetrics.recallAtK(ranked, relevant, k),
                 RetrievalMetrics.precisionAtK(ranked, relevant, k),
                 RetrievalMetrics.reciprocalRank(ranked, relevant),
@@ -582,7 +588,7 @@ public class RagEvalRunner implements CommandLineRunner {
 
     private static void writeTsv(Path file, List<QueryResult> results) throws IOException {
         try (BufferedWriter w = Files.newBufferedWriter(file, StandardCharsets.UTF_8)) {
-            w.write("qid\ttype\tlayer\tn_relevant\treturned\tjudged\trecall\tprecision\trr\tndcg\tlatency_ms\tranked");
+            w.write("qid\ttype\tlayer\tn_relevant\treturned\tjudged\trecall\tprecision\trr\tndcg\tlatency_ms\tranked\tscores");
             w.newLine();
             for (QueryResult r : results) {
                 EvalQuery q = r.query();
@@ -594,7 +600,9 @@ public class RagEvalRunner implements CommandLineRunner {
                         String.valueOf(RetrievalMetrics.relevantSet(q.grades()).size()), String.valueOf(r.ranked().size()),
                         String.valueOf(r.ranked().stream().filter(q.judged()::contains).count()),
                         cell(r.recall()), cell(r.precision()), cell(r.rr()), cell(r.ndcg()),
-                        String.format("%.2f", r.nanos() / 1e6), ranked));
+                        String.format("%.2f", r.nanos() / 1e6), ranked,
+                        // 与 ranked 一一对应，是该策略自己的分数；Day 14 拒答阈值据此离线校准
+                        r.scores().stream().map(v -> String.format("%.4f", v)).collect(Collectors.joining(","))));
                 w.newLine();
             }
         }
@@ -686,6 +694,6 @@ public class RagEvalRunner implements CommandLineRunner {
     }
 
     /** 无答案 query 的四个指标为 null。 */
-    record QueryResult(EvalQuery query, List<Long> ranked, long nanos,
+    record QueryResult(EvalQuery query, List<Long> ranked, List<Double> scores, long nanos,
                        Double recall, Double precision, Double rr, Double ndcg) {}
 }

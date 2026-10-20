@@ -72,6 +72,12 @@ r2:
 #     model: claude-haiku-5-5   # toy 项目语料少，Haiku 够用；效果不够再换 claude-sonnet-5-5
 #     max-tokens: 16000
 
+# 站内问答（可选，以下为默认值）。阈值针对 voyage-4 向量 top-1 余弦校准（EVAL.md「Day 14 · 拒答阈值」），换模型或检索方案须重新校准。
+# ask:
+#   top-k: 10
+#   refusal:
+#     min-top1-score: 0.40  # 低于它直接拒答、不调模型
+
 # ─────────────────────────────────────────────────────────────
 # 用法：cp application.yml.example application.yml，填入真实值。
 #

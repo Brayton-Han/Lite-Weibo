@@ -3,6 +3,7 @@ package com.brayton.weibo.controller;
 import com.brayton.weibo.config.security.CustomUserDetails;
 import com.brayton.weibo.dto.*;
 import com.brayton.weibo.enums.PostVisibility;
+import com.brayton.weibo.service.AskService;
 import com.brayton.weibo.service.FileService;
 import com.brayton.weibo.service.PostService;
 import jakarta.validation.Valid;
@@ -21,6 +22,7 @@ import java.util.List;
 public class PostController {
 
     private final PostService postService;
+    private final AskService askService;
 
     @GetMapping("/user/{uid}/posts")
     public ResponseEntity<ApiResponse<?>> getPosts(
@@ -115,5 +117,14 @@ public class PostController {
     ) {
         List<ScoredPostResponse> posts = postService.getSemanticSearchResults(q, k, self.getId());
         return ResponseEntity.ok(ApiResponse.success(posts));
+    }
+
+    /** 站内问答：按意图分流，经验类带引用作答，共鸣类返回搜索结果，风险类返回求助渠道。见 {@link AskService} */
+    @GetMapping("/posts/search/ask")
+    public ResponseEntity<ApiResponse<?>> ask(
+            @RequestParam String q,
+            @AuthenticationPrincipal CustomUserDetails self
+    ) {
+        return ResponseEntity.ok(ApiResponse.success(askService.ask(q, self.getId())));
     }
 }
