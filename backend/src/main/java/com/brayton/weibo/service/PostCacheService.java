@@ -1,5 +1,6 @@
 package com.brayton.weibo.service;
 
+import com.brayton.weibo.common.AfterCommit;
 import com.brayton.weibo.dto.UserResponse;
 import com.brayton.weibo.entity.Post;
 import com.brayton.weibo.entity.User;
@@ -20,8 +21,6 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.Duration;
 import java.time.LocalDate;
@@ -35,12 +34,14 @@ import java.util.concurrent.TimeUnit;
 /**
  * 帖子快照的两级缓存：本地 Caffeine → Redis → DB（findByIdInWithUser）。
  *
- * 快照 = 帖子内容 + 三个计数 + 作者摘要，读路径命中时完全不查库。各部分的新鲜度策略不同：
+ * 快照 = 帖子内容 + 计数 + 作者摘要，读路径命中时完全不查库。各部分的新鲜度策略不同：
  *  - 内容（正文、图片、可见性）：编辑/删除提交后删 Redis + 本地，并在 1 秒后再删一次（延迟双删），
  *    堵住"读线程先读到旧行、写线程删完缓存后、读线程才把旧行回填"的竞态。
  *    改为非公开属于隐私问题，不能靠 TTL 兜底；
- *  - 计数：点赞/评论/转发提交后用 Lua 对 Redis 里的快照就地 HINCRBY，不删缓存——
- *    热帖每秒大量点赞，若每次都删，等于让它持续击穿；
+ *  - 评论/转发数：提交后用 Lua 对 Redis 里的快照就地 HINCRBY，不删缓存——
+ *    计数变化频繁，若每次都删，热帖等于持续击穿；
+ *  - 点赞数：实时值由 {@link LikeCountService} 维护，快照里的 likeCount 是回填时的 DB 副本，
+ *    只在拿不到 Redis 计数时兜底；
  *  - 作者摘要：改名/换头像不主动失效，最长 Redis TTL 后生效（一个作者的帖子无法廉价枚举）。
  *
  * 本地缓存只做 TTL 过期（{@link #LOCAL_TTL}），计数在本地有秒级延迟；多实例部署时，
@@ -63,7 +64,7 @@ public class PostCacheService {
     private static final String F_MISSING = "missing";
 
     public enum Counter {
-        LIKE("like"), COMMENT("comment"), REPOST("repost");
+        COMMENT("comment"), REPOST("repost");
 
         final String field;
 
@@ -107,8 +108,8 @@ public class PostCacheService {
     }
 
     /**
-     * 计数在 data JSON 里也有一份（回填时的值），读 Redis 时以 hash 中独立的计数字段为准，
-     * 因为只有那几个字段会被 HINCRBY 就地更新。
+     * 评论/转发数在 data JSON 里也有一份（回填时的值），读 Redis 时以 hash 中独立的计数字段为准，
+     * 因为只有那几个字段会被 HINCRBY 就地更新。likeCount 只是 DB 副本，见类注释。
      */
     public record PostSnapshot(Long id, AuthorSnapshot author, PostType type, String content, List<String> images,
                                Long refPostId, PostVisibility visibility, LocalDateTime createdAt,
@@ -122,9 +123,9 @@ public class PostCacheService {
                     p.getLikeCount(), p.getCommentCount(), p.getRepostCount());
         }
 
-        PostSnapshot withCounts(long like, long comment, long repost) {
+        PostSnapshot withCounts(long comment, long repost) {
             return new PostSnapshot(id, author, type, content, images, refPostId, visibility, createdAt,
-                    updatedAt, edited, like, comment, repost);
+                    updatedAt, edited, likeCount, comment, repost);
         }
     }
 
@@ -235,7 +236,6 @@ public class PostCacheService {
         try {
             PostSnapshot s = mapper.readValue(data.toString(), PostSnapshot.class);
             return Optional.of(s.withCounts(
-                    count(hash, Counter.LIKE, s.likeCount()),
                     count(hash, Counter.COMMENT, s.commentCount()),
                     count(hash, Counter.REPOST, s.repostCount())));
         } catch (JsonProcessingException | NumberFormatException e) {
@@ -280,7 +280,6 @@ public class PostCacheService {
         try {
             return Map.of(
                     F_DATA, mapper.writeValueAsString(s),
-                    Counter.LIKE.field, Long.toString(s.likeCount()),
                     Counter.COMMENT.field, Long.toString(s.commentCount()),
                     Counter.REPOST.field, Long.toString(s.repostCount()));
         } catch (JsonProcessingException e) {
@@ -294,7 +293,7 @@ public class PostCacheService {
 
     /** 帖子内容变化（编辑、删除）：事务提交后删两级缓存，并延迟再删一次 Redis */
     public void evict(Long postId) {
-        afterCommit(() -> {
+        AfterCommit.run(() -> {
             evictNow(postId);
             delayedEvictor.schedule(() -> evictNow(postId), DOUBLE_DELETE_DELAY_MS, TimeUnit.MILLISECONDS);
         });
@@ -312,7 +311,7 @@ public class PostCacheService {
 
     /** 计数变化：事务提交后对 Redis 快照就地加减；本地缓存不动，靠短 TTL 收敛 */
     public void adjustCount(Long postId, Counter counter, long delta) {
-        afterCommit(() -> {
+        AfterCommit.run(() -> {
             try {
                 redis.execute(ADJUST_COUNT, List.of(key(postId)), counter.field, Long.toString(delta));
             } catch (DataAccessException e) {
@@ -320,22 +319,5 @@ public class PostCacheService {
                 log.warn("帖子缓存计数更新失败 postId={} {}：{}", postId, counter, e.getMessage());
             }
         });
-    }
-
-    /**
-     * 必须在提交后执行：提交前改缓存，若事务回滚，缓存里就是 DB 中不存在的状态；
-     * 且提交前删缓存，并发读会在提交前把旧行回填进来。
-     */
-    private static void afterCommit(Runnable action) {
-        if (TransactionSynchronizationManager.isSynchronizationActive()) {
-            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-                @Override
-                public void afterCommit() {
-                    action.run();
-                }
-            });
-        } else {
-            action.run();
-        }
     }
 }

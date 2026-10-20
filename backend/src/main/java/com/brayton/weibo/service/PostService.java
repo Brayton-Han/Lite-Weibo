@@ -49,6 +49,7 @@ public class PostService {
     private final PostEmbeddingRepository embeddingRepository;
     private final PostLexicalSearchRepository lexicalSearchRepository;
     private final PostCacheService postCache;
+    private final LikeCountService likeCountService;
 
     public static final int SEMANTIC_QUERY_MAX_LENGTH = 200;
     public static final int SEMANTIC_MAX_K = 50;
@@ -56,7 +57,8 @@ public class PostService {
     /**
      * 根据 post 构建完整响应
      */
-    private PostResponse buildPostResponse(Post post, Long currentUserId, boolean following, boolean followed) {
+    private PostResponse buildPostResponse(Post post, Long currentUserId, boolean following, boolean followed,
+                                           Map<Long, Long> likeCounts) {
 
         User author = post.getUser();
         boolean isLiked = likeRepository.existsByUserIdAndPostId(currentUserId, post.getId());
@@ -68,10 +70,11 @@ public class PostService {
                 .type(post.getType())
                 .content(post.getContent())
                 .images(post.getImages())
-                .refPost(post.getRefPost() == null ? null : buildPostResponse(post.getRefPost(), currentUserId, false, false)) // don't care
+                .refPost(post.getRefPost() == null ? null : buildPostResponse(post.getRefPost(), currentUserId, false, false, likeCounts)) // don't care
                 .visibility(post.getVisibility())
                 .liked(isLiked)
-                .likeCount(post.getLikeCount())
+                // 实时值在 Redis；拿不到时用 DB 副本兜底（见 LikeCountService）
+                .likeCount(likeCounts.getOrDefault(post.getId(), post.getLikeCount()))
                 .commentCount(post.getCommentCount())
                 .repostCount(post.getRepostCount())
                 .createdAt(post.getCreatedAt())
@@ -80,7 +83,8 @@ public class PostService {
                 .build();
     }
 
-    private PostResponse buildPostResponse(Post post, Long currentUserId, boolean following, boolean followed, boolean isLiked) {
+    private PostResponse buildPostResponse(Post post, Long currentUserId, boolean following, boolean followed, boolean isLiked,
+                                           Map<Long, Long> likeCounts) {
 
         User author = post.getUser();
 
@@ -91,10 +95,11 @@ public class PostService {
                 .type(post.getType())
                 .content(post.getContent())
                 .images(post.getImages())
-                .refPost(post.getRefPost() == null ? null : buildPostResponse(post.getRefPost(), currentUserId, false, false)) // don't care
+                .refPost(post.getRefPost() == null ? null : buildPostResponse(post.getRefPost(), currentUserId, false, false, likeCounts)) // don't care
                 .visibility(post.getVisibility())
                 .liked(isLiked)
-                .likeCount(post.getLikeCount())
+                // 实时值在 Redis；拿不到时用 DB 副本兜底（见 LikeCountService）
+                .likeCount(likeCounts.getOrDefault(post.getId(), post.getLikeCount()))
                 .commentCount(post.getCommentCount())
                 .repostCount(post.getRepostCount())
                 .createdAt(post.getCreatedAt())
@@ -104,13 +109,12 @@ public class PostService {
     }
 
     /**
-     * 由缓存快照构建响应。snapshots 需含 refPostId 对应的原帖（见 {@link #loadSnapshots}）；
+     * 由缓存快照构建响应。batch 需含 refPostId 对应的原帖（见 {@link #loadBatch}）；
      * 原帖已删除时 refPost 为 null。转发总是指向源帖，只需解析一层。
      */
-    private PostResponse buildPostResponse(PostSnapshot post, Map<Long, PostSnapshot> snapshots,
-                                           boolean following, boolean followed, Set<Long> likedPostIds) {
+    private PostResponse buildPostResponse(PostSnapshot post, PostBatch batch, boolean following, boolean followed) {
 
-        PostSnapshot ref = post.refPostId() == null ? null : snapshots.get(post.refPostId());
+        PostSnapshot ref = post.refPostId() == null ? null : batch.get(post.refPostId());
 
         return PostResponse.builder()
                 .id(post.id())
@@ -119,10 +123,11 @@ public class PostService {
                 .type(post.type())
                 .content(post.content())
                 .images(post.images())
-                .refPost(ref == null ? null : buildPostResponse(ref, Map.of(), false, false, likedPostIds)) // don't care
+                .refPost(ref == null ? null : buildPostResponse(ref, batch, false, false)) // don't care
                 .visibility(post.visibility())
-                .liked(likedPostIds.contains(post.id()))
-                .likeCount(post.likeCount())
+                .liked(batch.likedIds().contains(post.id()))
+                // 快照里的 likeCount 是 DB 副本，仅在拿不到 Redis 计数时兜底
+                .likeCount(batch.likeCounts().getOrDefault(post.id(), post.likeCount()))
                 .commentCount(post.commentCount())
                 .repostCount(post.repostCount())
                 .createdAt(post.createdAt())
@@ -131,8 +136,16 @@ public class PostService {
                 .build();
     }
 
-    /** 取帖子快照，连同它们转发的原帖一起放进同一个 map */
-    private Map<Long, PostSnapshot> loadSnapshots(Collection<Long> ids) {
+    /** 一批帖子渲染所需的数据：快照（含被转发的原帖）、请求者赞过哪些、实时点赞数 */
+    private record PostBatch(Map<Long, PostSnapshot> snapshots, Set<Long> likedIds, Map<Long, Long> likeCounts) {
+
+        PostSnapshot get(Long id) {
+            return snapshots.get(id);
+        }
+    }
+
+    /** 取帖子快照（连同它们转发的原帖），以及 viewer 的点赞状态和实时点赞数 */
+    private PostBatch loadBatch(Collection<Long> ids, Long viewerId) {
         Map<Long, PostSnapshot> snapshots = new HashMap<>(postCache.getPosts(ids));
         List<Long> refIds = snapshots.values().stream()
                 .map(PostSnapshot::refPostId)
@@ -140,7 +153,19 @@ public class PostService {
                 .distinct()
                 .toList();
         snapshots.putAll(postCache.getPosts(refIds));
-        return snapshots;
+        return new PostBatch(snapshots,
+                likedPostIds(viewerId, snapshots.keySet()),
+                likeCountService.getCounts(snapshots.keySet()));
+    }
+
+    /** 实体路径（个人主页、好友帖、发帖/编辑的返回）的实时点赞数，连同被转发的原帖一起批量取 */
+    private Map<Long, Long> likeCountsOf(Collection<Post> posts) {
+        Set<Long> ids = new HashSet<>();
+        for (Post p : posts) {
+            ids.add(p.getId());
+            if (p.getRefPost() != null) ids.add(p.getRefPost().getId());
+        }
+        return likeCountService.getCounts(ids);
     }
 
     private Set<Long> likedPostIds(Long userId, Collection<Long> postIds) {
@@ -201,18 +226,16 @@ public class PostService {
                     .map(id -> Long.valueOf(id.toString()))
                     .toList();
 
-            // postMap 里还混有被转发的原帖，作者集合只取本批 feed 条目
-            Map<Long, PostSnapshot> postMap = loadSnapshots(postIds);
+            // batch 里还混有被转发的原帖，作者集合只取本批 feed 条目
+            PostBatch batch = loadBatch(postIds, userId);
 
             Set<Long> authorIds = postIds.stream()
-                    .map(postMap::get)
+                    .map(batch::get)
                     .filter(Objects::nonNull)
                     .map(p -> p.author().id())
                     .collect(Collectors.toSet());
             Set<Long> followingIds = followRepository.findFollowingIds(userId, authorIds);
             Set<Long> followedByIds = followRepository.findFollowedByIds(userId, authorIds);
-
-            Set<Long> likedPostIds = likedPostIds(userId, postMap.keySet());
 
             long advanced = cursor;
 
@@ -222,7 +245,7 @@ public class PostService {
                 if (rawId == null || score == null) continue;
 
                 Long postId = Long.valueOf(rawId.toString());
-                PostSnapshot post = postMap.get(postId);
+                PostSnapshot post = batch.get(postId);
 
                 if (post == null) {
                     // 幽灵条目：帖子已删除。扇出在事务提交后才执行，
@@ -235,7 +258,7 @@ public class PostService {
                     boolean followed  = sameUser || followedByIds.contains(authorId);
 
                     if (isVisibleInFeed(post.visibility(), sameUser, following, followed)) {
-                        result.add(buildPostResponse(post, postMap, following, followed, likedPostIds));
+                        result.add(buildPostResponse(post, batch, following, followed));
                     }
                 }
 
@@ -267,13 +290,12 @@ public class PostService {
         if (ids.isEmpty()) return Collections.emptyList();
 
         // Step 2: 批量取快照（缓存未命中才查 DB）。抽样可能重复，这里按 id 去重
-        Map<Long, PostSnapshot> snapshots = loadSnapshots(ids);
+        PostBatch batch = loadBatch(ids, userId);
         List<PostSnapshot> posts = ids.stream().distinct()
-                .map(snapshots::get)
+                .map(batch::get)
                 .filter(Objects::nonNull)
                 .toList();
         if (posts.isEmpty()) return Collections.emptyList();
-        Set<Long> likedPostIds = likedPostIds(userId, snapshots.keySet());
 
         // Step 3: 可见性过滤
         List<PostResponse> visiblePosts = new ArrayList<>();
@@ -286,7 +308,7 @@ public class PostService {
             boolean followed = followRepository.existsByFollowerIdAndFollowingId(authorId, userId);
 
             if (isVisibleInFeed(p.visibility(), false, following, followed)) {
-                visiblePosts.add(buildPostResponse(p, snapshots, true, followed, likedPostIds));
+                visiblePosts.add(buildPostResponse(p, batch, true, followed));
             }
         }
 
@@ -334,9 +356,8 @@ public class PostService {
                     .map(id -> Long.valueOf(id.toString()))
                     .toList();
 
-            Map<Long, PostSnapshot> map = loadSnapshots(postIds);
             // liked 标记按请求者算：这里要回答"我赞过吗"，不是"列表主人赞过吗"
-            Set<Long> likedByViewer = likedPostIds(currentUserId, map.keySet());
+            PostBatch batch = loadBatch(postIds, currentUserId);
 
             long advanced = cursor;
 
@@ -346,7 +367,7 @@ public class PostService {
                 if (rawId == null || score == null) continue;
 
                 Long postId = Long.valueOf(rawId.toString());
-                PostSnapshot post = map.get(postId);
+                PostSnapshot post = batch.get(postId);
                 Like like = post == null ? null
                         : likeRepository.findByUserIdAndPostId(userId, postId).orElse(null);
 
@@ -364,7 +385,7 @@ public class PostService {
 
                     // 仅当前不可见，点赞关系仍然有效，不做清理
                     if (isVisibleToUser(post.visibility(), sameUser, following, followed)) {
-                        result.add(buildPostResponse(post, map, following, followed, likedByViewer));
+                        result.add(buildPostResponse(post, batch, following, followed));
                     }
                 }
 
@@ -415,8 +436,9 @@ public class PostService {
                 PageRequest.of(0, size)
         );
 
+        Map<Long, Long> likeCounts = likeCountsOf(posts);
         return posts.stream()
-                .map(post -> buildPostResponse(post, currentUserId, following, followed))
+                .map(post -> buildPostResponse(post, currentUserId, following, followed, likeCounts))
                 .toList();
     }
 
@@ -429,8 +451,9 @@ public class PostService {
                 PageRequest.of(0, size)
         );
 
+        Map<Long, Long> likeCounts = likeCountsOf(posts);
         return posts.stream()
-                .map(post -> buildPostResponse(post, currentUserId, true, true))
+                .map(post -> buildPostResponse(post, currentUserId, true, true, likeCounts))
                 .toList();
     }
 
@@ -446,15 +469,14 @@ public class PostService {
                 .stream()
                 .map(PostLexicalSearchRepository.Hit::postId)
                 .toList();
-        Map<Long, PostSnapshot> posts = loadSnapshots(ids);
-        Set<Long> likedPostIds = likedPostIds(selfId, posts.keySet());
+        PostBatch batch = loadBatch(ids, selfId);
 
         // 按相关性顺序组装；检索与加载之间被删除的帖子由 @Where 滤掉，可见性这里再判一次
         List<PostResponse> result = new ArrayList<>(ids.size());
         for (Long id : ids) {
-            PostSnapshot post = posts.get(id);
+            PostSnapshot post = batch.get(id);
             if (post != null && post.visibility() == PostVisibility.PUBLIC) {
-                result.add(buildPostResponse(post, posts, false, false, likedPostIds));
+                result.add(buildPostResponse(post, batch, false, false));
             }
         }
         return result;
@@ -484,18 +506,16 @@ public class PostService {
         }
 
         List<PostEmbeddingRepository.Hit> hits = embeddingRepository.searchNearest(vector, embeddingClient.modelId(), k);
-        Map<Long, PostSnapshot> posts = loadSnapshots(
-                hits.stream().map(PostEmbeddingRepository.Hit::postId).toList());
-        Set<Long> likedPostIds = likedPostIds(selfId, posts.keySet());
+        PostBatch batch = loadBatch(hits.stream().map(PostEmbeddingRepository.Hit::postId).toList(), selfId);
 
         // 按相似度顺序组装。检索与加载之间帖子可能刚被删或改为非公开：@Where 会滤掉已删除的，可见性这里再判一次
         List<ScoredPostResponse> result = new ArrayList<>(hits.size());
         for (PostEmbeddingRepository.Hit hit : hits) {
-            PostSnapshot post = posts.get(hit.postId());
+            PostSnapshot post = batch.get(hit.postId());
             if (post == null || post.visibility() != PostVisibility.PUBLIC) {
                 continue;
             }
-            result.add(new ScoredPostResponse(buildPostResponse(post, posts, false, false, likedPostIds), hit.score()));
+            result.add(new ScoredPostResponse(buildPostResponse(post, batch, false, false), hit.score()));
         }
         return result;
     }
@@ -541,7 +561,7 @@ public class PostService {
             publisher.publishEvent(new PostEmbeddingEvent(saved.getId()));
         }
 
-        return buildPostResponse(saved, userId, true, true, false); // 返回新帖详情
+        return buildPostResponse(saved, userId, true, true, false, likeCountsOf(List.of(saved))); // 返回新帖详情
     }
 
     @Transactional
@@ -612,6 +632,6 @@ public class PostService {
         // 内容或可见性变了都要同步向量（含删除）；没有实质变化时 EmbeddingWriteService 会比对后跳过
         publisher.publishEvent(new PostEmbeddingEvent(saved.getId()));
 
-        return buildPostResponse(saved, currentUserId, true, true);
+        return buildPostResponse(saved, currentUserId, true, true, likeCountsOf(List.of(saved)));
     }
 }

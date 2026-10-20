@@ -71,13 +71,7 @@ public interface PostRepository extends JpaRepository<Post, Long> {
 
     List<Post> findByIdInOrderByCreatedAtDesc(Set<Object> postIds);
 
-    @Modifying
-    @Query("UPDATE Post p SET p.likeCount = p.likeCount + 1 WHERE p.id = :postId")
-    void incrementLikeCount(@Param("postId") Long postId);
-
-    @Modifying
-    @Query("UPDATE Post p SET p.likeCount = CASE WHEN p.likeCount > 0 THEN p.likeCount - 1 ELSE 0 END WHERE p.id = :postId")
-    void decrementLikeCount(@Param("postId") Long postId);
+    // likeCount 不在这里加减：由 LikeCountService 维护 Redis 计数并异步写回（LikeCountRepository）
 
     @Modifying
     @Query("UPDATE Post p SET p.commentCount = p.commentCount + 1 WHERE p.id = :postId")

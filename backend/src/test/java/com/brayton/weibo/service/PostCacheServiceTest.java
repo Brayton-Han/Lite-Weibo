@@ -33,7 +33,7 @@ class PostCacheServiceTest {
         when(postRepository.findByIdInWithUser(List.of(1L))).thenReturn(List.of(post(1, 7)));
 
         assertThat(cache.getPosts(List.of(1L))).containsKey(1L);
-        assertThat(cache.getPosts(List.of(1L)).get(1L).likeCount()).isEqualTo(7);
+        assertThat(cache.getPosts(List.of(1L)).get(1L).commentCount()).isEqualTo(7);
 
         verify(postRepository, times(1)).findByIdInWithUser(anyList());
     }
@@ -50,16 +50,16 @@ class PostCacheServiceTest {
 
     @Test
     void redisHitSkipsDbAndCounterFieldsOverrideSnapshotJson() throws Exception {
-        // data 里的计数是回填时的值，like 字段已被 HINCRBY 就地加过
+        // data 里的计数是回填时的值，comment 字段已被 HINCRBY 就地加过
         String json = mapper.writeValueAsString(PostSnapshot.from(post(1, 7)));
         when(redis.executePipelined(any(SessionCallback.class))).thenReturn(List.of(
-                Map.of("data", json, "like", "9", "comment", "0", "repost", "0"),
+                Map.of("data", json, "comment", "9", "repost", "0"),
                 Map.of("missing", "1")));
 
         Map<Long, PostSnapshot> result = cache.getPosts(List.of(1L, 2L));
 
         assertThat(result).containsOnlyKeys(1L);
-        assertThat(result.get(1L).likeCount()).isEqualTo(9);
+        assertThat(result.get(1L).commentCount()).isEqualTo(9);
         assertThat(result.get(1L).content()).isEqualTo("正文1");
         verifyNoInteractions(postRepository);
     }
@@ -75,18 +75,18 @@ class PostCacheServiceTest {
 
     @Test
     void adjustCountRunsScriptImmediatelyOutsideTransaction() {
-        cache.adjustCount(5L, Counter.LIKE, -1);
+        cache.adjustCount(5L, Counter.COMMENT, -1);
 
-        verify(redis).execute(any(RedisScript.class), eq(List.of("post:5")), eq("like"), eq("-1"));
+        verify(redis).execute(any(RedisScript.class), eq(List.of("post:5")), eq("comment"), eq("-1"));
     }
 
-    private static Post post(long id, long likes) {
+    private static Post post(long id, long comments) {
         Post p = new Post();
         p.setId(id);
         p.setUser(new User("u" + id, "x", "u" + id + "@example.com"));
         p.setContent("正文" + id);
         p.setVisibility(PostVisibility.PUBLIC);
-        p.setLikeCount(likes);
+        p.setCommentCount(comments);
         p.setCreatedAt(LocalDateTime.of(2026, 1, 1, 0, 0));
         return p;
     }

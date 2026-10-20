@@ -37,7 +37,9 @@ class PostServiceSemanticSearchTest {
             mock(PostLexicalSearchRepository.class),
             // Redis 为 mock：管道读返回空，等价于缓存全部未命中，走 findByIdInWithUser
             new PostCacheService(postRepository, mock(StringRedisTemplate.class),
-                    new ObjectMapper().findAndRegisterModules()));
+                    new ObjectMapper().findAndRegisterModules()),
+            // getCounts 返回空 map，点赞数按快照里的 DB 副本兜底
+            mock(LikeCountService.class));
 
     private final float[] vec = {0.1f};
 

@@ -24,7 +24,7 @@ public class LikeService {
     private final ApplicationEventPublisher publisher;
     private final UserRepository userRepository;
     private final FeedWriteService feedWriteService;
-    private final PostCacheService postCache;
+    private final LikeCountService likeCountService;
 
     @Transactional
     public void likePost(Long userId, Long postId) {
@@ -46,9 +46,8 @@ public class LikeService {
         like.setPostId(postId);
         Like saved = likeRepository.save(like);
 
-        // 更新 Post 的 likeCount
-        postRepository.incrementLikeCount(postId);
-        postCache.adjustCount(postId, PostCacheService.Counter.LIKE, 1);
+        // 点赞数走 Redis 计数、异步写回 posts.like_count，不再同步 UPDATE posts（热帖行锁争用）
+        likeCountService.adjust(postId, 1);
 
         if (!userId.equals(post.getUser().getId())) {
             publisher.publishEvent(new LikeEvent(userId, post.getUser().getId(), postId));
@@ -65,9 +64,7 @@ public class LikeService {
 
         likeRepository.deleteByUserIdAndPostId(userId, postId);
 
-        // 更新 Post 的 likeCount
-        postRepository.decrementLikeCount(postId);
-        postCache.adjustCount(postId, PostCacheService.Counter.LIKE, -1);
+        likeCountService.adjust(postId, -1);
 
         // 同步清理 liked: ZSet，否则会残留读路径无法解释的幽灵条目
         redisService.removeFromLiked(userId, postId);
