@@ -64,6 +64,14 @@ r2:
 #     model: rerank-3       # 或 rerank-3-lite（更快更便宜）
 #     timeout-ms: 2000      # 搜索请求里的读超时；超时或失败降级为第一阶段排序
 
+# 生成层 Claude（可选，以下均为默认值）。API key 只走环境变量 ANTHROPIC_API_KEY，不要写在这里。
+# claude:
+#   timeout-ms: 60000
+#   max-retries: 2          # SDK 自带重试：408/409/429/5xx 与连接错误
+#   generation:
+#     model: claude-haiku-5-5   # toy 项目语料少，Haiku 够用；效果不够再换 claude-sonnet-5-5
+#     max-tokens: 16000
+
 # ─────────────────────────────────────────────────────────────
 # 用法：cp application.yml.example application.yml，填入真实值。
 #
