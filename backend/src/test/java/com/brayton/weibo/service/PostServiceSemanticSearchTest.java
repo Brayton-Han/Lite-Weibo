@@ -10,9 +10,11 @@ import com.brayton.weibo.error.WeiboException;
 import com.brayton.weibo.repository.*;
 import com.brayton.weibo.repository.PostEmbeddingRepository.Hit;
 import com.brayton.weibo.webSocket.WebSocketPusher;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.data.redis.core.StringRedisTemplate;
 
 import java.util.List;
 
@@ -32,7 +34,10 @@ class PostServiceSemanticSearchTest {
             postRepository, mock(UserRepository.class), mock(FollowRepository.class), mock(LikeRepository.class),
             mock(CommentRepository.class), mock(RedisService.class), mock(WebSocketPusher.class),
             mock(ApplicationEventPublisher.class), client, embeddingRepository,
-            mock(PostLexicalSearchRepository.class));
+            mock(PostLexicalSearchRepository.class),
+            // Redis 为 mock：管道读返回空，等价于缓存全部未命中，走 findByIdInWithUser
+            new PostCacheService(postRepository, mock(StringRedisTemplate.class),
+                    new ObjectMapper().findAndRegisterModules()));
 
     private final float[] vec = {0.1f};
 

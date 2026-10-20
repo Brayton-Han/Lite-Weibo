@@ -17,6 +17,8 @@ import com.brayton.weibo.event.LikeEvent;
 import com.brayton.weibo.event.PostEmbeddingEvent;
 import com.brayton.weibo.event.PostFanOutEvent;
 import com.brayton.weibo.repository.*;
+import com.brayton.weibo.service.PostCacheService.Counter;
+import com.brayton.weibo.service.PostCacheService.PostSnapshot;
 import com.brayton.weibo.webSocket.WebSocketPusher;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
@@ -46,6 +48,7 @@ public class PostService {
     private final EmbeddingClient embeddingClient;
     private final PostEmbeddingRepository embeddingRepository;
     private final PostLexicalSearchRepository lexicalSearchRepository;
+    private final PostCacheService postCache;
 
     public static final int SEMANTIC_QUERY_MAX_LENGTH = 200;
     public static final int SEMANTIC_MAX_K = 50;
@@ -100,6 +103,50 @@ public class PostService {
                 .build();
     }
 
+    /**
+     * 由缓存快照构建响应。snapshots 需含 refPostId 对应的原帖（见 {@link #loadSnapshots}）；
+     * 原帖已删除时 refPost 为 null。转发总是指向源帖，只需解析一层。
+     */
+    private PostResponse buildPostResponse(PostSnapshot post, Map<Long, PostSnapshot> snapshots,
+                                           boolean following, boolean followed, Set<Long> likedPostIds) {
+
+        PostSnapshot ref = post.refPostId() == null ? null : snapshots.get(post.refPostId());
+
+        return PostResponse.builder()
+                .id(post.id())
+                // Don't care friendCount and postCount
+                .user(post.author().toResponse(following, followed))
+                .type(post.type())
+                .content(post.content())
+                .images(post.images())
+                .refPost(ref == null ? null : buildPostResponse(ref, Map.of(), false, false, likedPostIds)) // don't care
+                .visibility(post.visibility())
+                .liked(likedPostIds.contains(post.id()))
+                .likeCount(post.likeCount())
+                .commentCount(post.commentCount())
+                .repostCount(post.repostCount())
+                .createdAt(post.createdAt())
+                .updatedAt(post.updatedAt())
+                .isEdited(post.edited())
+                .build();
+    }
+
+    /** 取帖子快照，连同它们转发的原帖一起放进同一个 map */
+    private Map<Long, PostSnapshot> loadSnapshots(Collection<Long> ids) {
+        Map<Long, PostSnapshot> snapshots = new HashMap<>(postCache.getPosts(ids));
+        List<Long> refIds = snapshots.values().stream()
+                .map(PostSnapshot::refPostId)
+                .filter(id -> id != null && !snapshots.containsKey(id))
+                .distinct()
+                .toList();
+        snapshots.putAll(postCache.getPosts(refIds));
+        return snapshots;
+    }
+
+    private Set<Long> likedPostIds(Long userId, Collection<Long> postIds) {
+        return postIds.isEmpty() ? Set.of() : likeRepository.findLikedPostIds(userId, postIds);
+    }
+
 
 
     // !!! USE FOR NEWEST/FOLLOWING/LIKED POST TIMELINE !!!
@@ -107,11 +154,11 @@ public class PostService {
      * 帖子的 visibility 设置是否允许 viewer 看到——纯粹的可见性规则，不含任何 feed 语义。
      * 与 SQL 版本的 {@link #visibilityFilter} 保持同一套判定，两者必须一起改。
      */
-    private boolean isVisibleToUser(Post post, boolean self, boolean following, boolean followed) {
+    private boolean isVisibleToUser(PostVisibility visibility, boolean self, boolean following, boolean followed) {
         // 自己永远能看到自己的帖子
         if (self) return true;
 
-        return switch (post.getVisibility()) {
+        return switch (visibility) {
             case PUBLIC    -> true;              // 公开帖不要求关注关系
             case FOLLOWERS -> following;         // 粉丝可见：viewer 关注了作者
             case FRIENDS   -> following && followed;  // 好友可见：必须互关
@@ -128,11 +175,11 @@ public class PostService {
      * liked 列表不经过扇出（条目来自用户自己的点赞行为，与关注关系无关），
      * 因此只走 {@link #isVisibleToUser}，不适用这条额外限制。
      */
-    private boolean isVisibleInFeed(Post post, boolean self, boolean following, boolean followed) {
+    private boolean isVisibleInFeed(PostVisibility visibility, boolean self, boolean following, boolean followed) {
         // 已取关：扇出时写进来的残留条目
         if (!self && !following) return false;
 
-        return isVisibleToUser(post, self, following, followed);
+        return isVisibleToUser(visibility, self, following, followed);
     }
 
     public List<PostResponse> getNewestFeed(Long userId, Long lastTimestamp, int size) {
@@ -154,17 +201,18 @@ public class PostService {
                     .map(id -> Long.valueOf(id.toString()))
                     .toList();
 
-            List<Post> posts = postRepository.findByIdInWithUser(postIds);
-            Map<Long, Post> postMap =
-                    posts.stream().collect(Collectors.toMap(Post::getId, p -> p));
+            // postMap 里还混有被转发的原帖，作者集合只取本批 feed 条目
+            Map<Long, PostSnapshot> postMap = loadSnapshots(postIds);
 
-            Set<Long> authorIds = posts.stream()
-                    .map(p -> p.getUser().getId())
+            Set<Long> authorIds = postIds.stream()
+                    .map(postMap::get)
+                    .filter(Objects::nonNull)
+                    .map(p -> p.author().id())
                     .collect(Collectors.toSet());
             Set<Long> followingIds = followRepository.findFollowingIds(userId, authorIds);
             Set<Long> followedByIds = followRepository.findFollowedByIds(userId, authorIds);
 
-            Set<Long> likedPostIds = likeRepository.findLikedPostIds(userId, postMap.keySet());
+            Set<Long> likedPostIds = likedPostIds(userId, postMap.keySet());
 
             long advanced = cursor;
 
@@ -174,21 +222,20 @@ public class PostService {
                 if (rawId == null || score == null) continue;
 
                 Long postId = Long.valueOf(rawId.toString());
-                Post post = postMap.get(postId);
+                PostSnapshot post = postMap.get(postId);
 
                 if (post == null) {
                     // 幽灵条目：帖子已删除。扇出在事务提交后才执行，
                     // 这里查不到不会是"尚未提交"，可以放心清理。
                     redisService.removeFromFeed(userId, postId);
                 } else {
-                    Long authorId = post.getUser().getId();
+                    Long authorId = post.author().id();
                     boolean sameUser = authorId.equals(userId);
                     boolean following = sameUser || followingIds.contains(authorId);
                     boolean followed  = sameUser || followedByIds.contains(authorId);
-                    boolean isLiked = likedPostIds.contains(postId);
 
-                    if (isVisibleInFeed(post, sameUser, following, followed)) {
-                        result.add(buildPostResponse(post, userId, following, followed, isLiked));
+                    if (isVisibleInFeed(post.visibility(), sameUser, following, followed)) {
+                        result.add(buildPostResponse(post, postMap, following, followed, likedPostIds));
                     }
                 }
 
@@ -219,22 +266,27 @@ public class PostService {
         List<Long> ids = redisService.getRandomZSetMembers(key, sampleCount);
         if (ids.isEmpty()) return Collections.emptyList();
 
-        // Step 2: DB 批量查
-        List<Post> posts = postRepository.findByIdIn(ids);
+        // Step 2: 批量取快照（缓存未命中才查 DB）。抽样可能重复，这里按 id 去重
+        Map<Long, PostSnapshot> snapshots = loadSnapshots(ids);
+        List<PostSnapshot> posts = ids.stream().distinct()
+                .map(snapshots::get)
+                .filter(Objects::nonNull)
+                .toList();
         if (posts.isEmpty()) return Collections.emptyList();
+        Set<Long> likedPostIds = likedPostIds(userId, snapshots.keySet());
 
         // Step 3: 可见性过滤
         List<PostResponse> visiblePosts = new ArrayList<>();
-        for (Post p : posts) {
-            Long authorId = p.getUser().getId();
+        for (PostSnapshot p : posts) {
+            Long authorId = p.author().id();
 
             boolean self = authorId.equals(userId);
             if (self) continue;
             boolean following = followRepository.existsByFollowerIdAndFollowingId(userId, authorId);
             boolean followed = followRepository.existsByFollowerIdAndFollowingId(authorId, userId);
 
-            if (isVisibleInFeed(p, false, following, followed)) {
-                visiblePosts.add(buildPostResponse(p, userId, true, followed));
+            if (isVisibleInFeed(p.visibility(), false, following, followed)) {
+                visiblePosts.add(buildPostResponse(p, snapshots, true, followed, likedPostIds));
             }
         }
 
@@ -276,14 +328,15 @@ public class PostService {
                     redisService.getLikedAfterWithScores(userId, cursor, size);
             if (entries.isEmpty()) break;
 
-            Set<Object> postIds = entries.stream()
+            List<Long> postIds = entries.stream()
                     .map(ZSetOperations.TypedTuple::getValue)
                     .filter(Objects::nonNull)
-                    .collect(Collectors.toCollection(LinkedHashSet::new));
+                    .map(id -> Long.valueOf(id.toString()))
+                    .toList();
 
-            List<Post> posts = postRepository.findByIdIn(postIds);
-            Map<Long, Post> map = posts.stream()
-                    .collect(Collectors.toMap(Post::getId, p -> p));
+            Map<Long, PostSnapshot> map = loadSnapshots(postIds);
+            // liked 标记按请求者算：这里要回答"我赞过吗"，不是"列表主人赞过吗"
+            Set<Long> likedByViewer = likedPostIds(currentUserId, map.keySet());
 
             long advanced = cursor;
 
@@ -293,7 +346,7 @@ public class PostService {
                 if (rawId == null || score == null) continue;
 
                 Long postId = Long.valueOf(rawId.toString());
-                Post post = map.get(postId);
+                PostSnapshot post = map.get(postId);
                 Like like = post == null ? null
                         : likeRepository.findByUserIdAndPostId(userId, postId).orElse(null);
 
@@ -304,15 +357,14 @@ public class PostService {
                 } else {
                     // 可见性一律按请求者（currentUserId）与帖子作者的关系计算，
                     // 而不是按列表主人，否则会越权泄露对请求者不可见的帖子
-                    Long authorId = post.getUser().getId();
+                    Long authorId = post.author().id();
                     boolean sameUser = authorId.equals(currentUserId);
                     boolean following = sameUser || followRepository.existsByFollowerIdAndFollowingId(currentUserId, authorId);
                     boolean followed = sameUser || followRepository.existsByFollowerIdAndFollowingId(authorId, currentUserId);
 
                     // 仅当前不可见，点赞关系仍然有效，不做清理
-                    if (isVisibleToUser(post, sameUser, following, followed)) {
-                        // liked 标记同样按请求者算：这里要回答"我赞过吗"，不是"列表主人赞过吗"
-                        result.add(buildPostResponse(post, currentUserId, following, followed));
+                    if (isVisibleToUser(post.visibility(), sameUser, following, followed)) {
+                        result.add(buildPostResponse(post, map, following, followed, likedByViewer));
                     }
                 }
 
@@ -394,15 +446,15 @@ public class PostService {
                 .stream()
                 .map(PostLexicalSearchRepository.Hit::postId)
                 .toList();
-        Map<Long, Post> posts = postRepository.findByIdInWithUser(ids).stream()
-                .collect(Collectors.toMap(Post::getId, p -> p));
+        Map<Long, PostSnapshot> posts = loadSnapshots(ids);
+        Set<Long> likedPostIds = likedPostIds(selfId, posts.keySet());
 
         // 按相关性顺序组装；检索与加载之间被删除的帖子由 @Where 滤掉，可见性这里再判一次
         List<PostResponse> result = new ArrayList<>(ids.size());
         for (Long id : ids) {
-            Post post = posts.get(id);
-            if (post != null && post.getVisibility() == PostVisibility.PUBLIC) {
-                result.add(buildPostResponse(post, selfId, false, false));
+            PostSnapshot post = posts.get(id);
+            if (post != null && post.visibility() == PostVisibility.PUBLIC) {
+                result.add(buildPostResponse(post, posts, false, false, likedPostIds));
             }
         }
         return result;
@@ -432,18 +484,18 @@ public class PostService {
         }
 
         List<PostEmbeddingRepository.Hit> hits = embeddingRepository.searchNearest(vector, embeddingClient.modelId(), k);
-        Map<Long, Post> posts = postRepository.findByIdInWithUser(
-                        hits.stream().map(PostEmbeddingRepository.Hit::postId).toList())
-                .stream().collect(Collectors.toMap(Post::getId, p -> p));
+        Map<Long, PostSnapshot> posts = loadSnapshots(
+                hits.stream().map(PostEmbeddingRepository.Hit::postId).toList());
+        Set<Long> likedPostIds = likedPostIds(selfId, posts.keySet());
 
         // 按相似度顺序组装。检索与加载之间帖子可能刚被删或改为非公开：@Where 会滤掉已删除的，可见性这里再判一次
         List<ScoredPostResponse> result = new ArrayList<>(hits.size());
         for (PostEmbeddingRepository.Hit hit : hits) {
-            Post post = posts.get(hit.postId());
-            if (post == null || post.getVisibility() != PostVisibility.PUBLIC) {
+            PostSnapshot post = posts.get(hit.postId());
+            if (post == null || post.visibility() != PostVisibility.PUBLIC) {
                 continue;
             }
-            result.add(new ScoredPostResponse(buildPostResponse(post, selfId, false, false), hit.score()));
+            result.add(new ScoredPostResponse(buildPostResponse(post, posts, false, false, likedPostIds), hit.score()));
         }
         return result;
     }
@@ -476,6 +528,7 @@ public class PostService {
 
         if (refPost != null) {
             postRepository.incrementRepostCount(refPost.getId());
+            postCache.adjustCount(refPost.getId(), Counter.REPOST, 1);
         }
 
         // fan-out：事务提交后由 FeedWriteService#onPostFanOut 异步执行
@@ -511,10 +564,12 @@ public class PostService {
         // 3. 删转发
         if (post.getRefPost() != null) {
             postRepository.decrementRepostCount(post.getRefPost().getId());
+            postCache.adjustCount(post.getRefPost().getId(), Counter.REPOST, -1);
         }
 
         // 3. 删帖子
         postRepository.deleteById(postId);
+        postCache.evict(postId);
 
         // 删除向量，并重算「转发并评论」了它的帖子（它们的 chunk_text 里拼着本帖正文）。
         // 软删除不会触发 ON DELETE CASCADE，读时过滤也管不到转发帖，所以必须显式处理
@@ -546,6 +601,7 @@ public class PostService {
 
         post.setEdited(true);
         Post saved = postRepository.save(post);
+        postCache.evict(saved.getId());
 
         // 🍿 修补 timeline
         if (saved.getVisibility().ordinal() < oldVisibility.ordinal()) {

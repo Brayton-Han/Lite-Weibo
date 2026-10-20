@@ -30,6 +30,7 @@ public class CommentService {
     private final PostRepository postRepository;
     private final UserRepository userRepository;
     private final ApplicationEventPublisher publisher;
+    private final PostCacheService postCache;
 
     private CommentResponse buildCommentResponse(Comment comment, Long currentUserId) {
 
@@ -70,6 +71,7 @@ public class CommentService {
 
         commentRepository.save(comment);
         postRepository.incrementCommentCount(postId);
+        postCache.adjustCount(postId, PostCacheService.Counter.COMMENT, 1);
 
         if (!userId.equals(post.getUser().getId())) {
             publisher.publishEvent(new CommentEvent(userId, post.getUser().getId(), postId, content));
@@ -88,5 +90,6 @@ public class CommentService {
 
         commentRepository.deleteById(commentId);
         postRepository.decrementCommentCount(comment.getPost().getId());
+        postCache.adjustCount(comment.getPost().getId(), PostCacheService.Counter.COMMENT, -1);
     }
 }
