@@ -3,13 +3,16 @@ package com.brayton.weibo.service;
 import com.brayton.weibo.common.TimeUtil;
 import com.brayton.weibo.config.AsyncConfig;
 import com.brayton.weibo.entity.Post;
+import com.brayton.weibo.entity.User;
 import com.brayton.weibo.enums.PostVisibility;
 import com.brayton.weibo.event.FollowEvent;
 import com.brayton.weibo.event.PostFanOutEvent;
 import com.brayton.weibo.repository.FollowRepository;
 import com.brayton.weibo.repository.PostRepository;
+import com.brayton.weibo.repository.UserRepository;
 import com.brayton.weibo.webSocket.WebSocketPusher;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -37,6 +40,11 @@ import java.util.Set;
  *  - WebSocket "新帖"通知一定晚于 DB 提交，客户端收到通知后拉 feed 必能查到；
  *  - 线程池满触发 CallerRunsPolicy 时，同步执行也已在提交之后，不会拉长 DB 事务。
  *
+ * 推拉结合：粉丝数达到 {@link #pullThreshold} 的作者转为拉模式（见 {@link #usePullMode}），
+ * 公开/粉丝可见帖只写作者自己的发件箱 outbox:{authorId}，由关注者读 feed 时合并
+ * （{@link RedisService#getMergedFeedAfter}）；否则一条帖子要写几百万个收件箱。
+ * 好友可见帖仍然推给互关好友，私密帖只进作者自己的收件箱。
+ *
  * 仍未解决：进程崩溃或扇出中途 Redis 出错时该次扇出丢失且不重试（只记日志），
  * 需 Outbox / MQ 重试才能根治，见分析报告 §6.1-6。ZADD 幂等，届时重试是安全的。
  */
@@ -46,11 +54,31 @@ public class FeedWriteService {
 
     private final FollowRepository followRepository;
     private final PostRepository postRepository;
+    private final UserRepository userRepository;
     private final RedisService redisService;
     private final WebSocketPusher wsPusher;
 
-    /** 每个用户 feed ZSet 的最大条目数，超出部分按时间从旧到新淘汰 */
+    /** 每个用户 feed ZSet（以及大 V 发件箱）的最大条目数，超出部分按时间从旧到新淘汰 */
     public static final int FEED_MAX_SIZE = 1000;
+
+    @Value("${feed.pull.follower-threshold:10000}")
+    private long pullThreshold;
+
+    /**
+     * 该作者是否走拉模式：已标记的直接是；未标记的粉丝数达到阈值时置位。
+     *
+     * 只升不降：若掉粉后切回推模式，读者不再读他的发件箱，拉模式期间发的帖就从所有 feed 里消失了。
+     * 粉丝数读的是 users.follower_count，关注/取关时同步维护。
+     */
+    boolean usePullMode(Long authorId) {
+        User author = userRepository.findById(authorId).orElse(null);
+        if (author == null) return false;
+        if (author.isFeedPull()) return true;
+        if (author.getFollowerCount() < pullThreshold) return false;
+
+        userRepository.markFeedPull(authorId);
+        return true;
+    }
 
     /**
      * 计算一条帖子应当写入哪些用户的 feed（作者本人 + 按可见性展开的受众）。
@@ -76,11 +104,23 @@ public class FeedWriteService {
 
     /**
      * 同步扇出。回灌历史帖子时用 notify=false，避免为旧帖重复推送 WebSocket "新帖" 通知。
+     * 回灌与实时扇出走同一套推拉规则，因此也会重建大 V 的发件箱。
      *
      * @return 写入的 feed 条目数
      */
     public int fanOutToFeed(Long postId, Long authorId, PostVisibility visibility,
                             long timestamp, boolean notify) {
+        // 好友可见帖受众是互关好友，规模有限，仍然推；私密帖只有作者自己
+        boolean toFollowers = visibility == PostVisibility.PUBLIC || visibility == PostVisibility.FOLLOWERS;
+        if (toFollowers && usePullMode(authorId)) {
+            redisService.addToOutbox(authorId, postId, timestamp);
+            redisService.trimOutbox(authorId, FEED_MAX_SIZE);
+            // 作者自己仍从收件箱读到；粉丝不逐个推 WebSocket 通知，刷新时拉取
+            redisService.addToFeed(authorId, postId, timestamp);
+            redisService.trimFeed(authorId, FEED_MAX_SIZE);
+            return 2;
+        }
+
         Set<Long> pushIds = resolveFeedTargets(authorId, visibility);
 
         for (Long pushId : pushIds) {

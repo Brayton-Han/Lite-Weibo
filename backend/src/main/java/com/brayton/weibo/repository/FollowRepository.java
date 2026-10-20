@@ -27,6 +27,16 @@ public interface FollowRepository extends JpaRepository<FollowRelation, Long> {
     """)
     Set<Long> findFollowingIds(Long userId);
 
+    /** userId 关注的、处于拉模式的作者：读 feed 时要合并他们的发件箱 */
+    @Query("""
+        SELECT f.followingId
+        FROM FollowRelation f, User u
+        WHERE u.id = f.followingId
+          AND f.followerId = :userId
+          AND u.feedPull = true
+    """)
+    List<Long> findPullFollowingIds(@Param("userId") Long userId);
+
     @Query("""
         SELECT f.followingId
         FROM FollowRelation f

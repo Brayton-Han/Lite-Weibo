@@ -53,6 +53,10 @@ public class User {
     @Column(nullable = false)
     private int followCount = 0;
 
+    // 大 V 拉模式标记，只由 UserRepository#markFeedPull 置位，见 FeedWriteService#usePullMode
+    @Column(nullable = false)
+    private boolean feedPull = false;
+
     public User(String username, String passwordHashed, String email) {
         this.username = username;
         this.passwordHashed = passwordHashed;

@@ -212,19 +212,18 @@ public class PostService {
         long cursor = lastTimestamp == null ? Long.MAX_VALUE : lastTimestamp;
         List<PostResponse> result = new ArrayList<>();
 
+        // 推拉结合：自己的收件箱 + 关注的大 V 的发件箱（见 FeedWriteService#usePullMode）
+        List<Long> pullAuthorIds = followRepository.findPullFollowingIds(userId);
+
         while (result.size() < size) {
             int fetch = Math.min(size * 5, 100);
             // 游标由 ZSet score 推进，不能由 DB 查到的帖子推进：若一批全是幽灵条目
             // （帖子已删除），基于帖子的游标原地不动，外层 while 反复取同一窗口 → 死循环。
-            List<ZSetOperations.TypedTuple<Object>> entries =
-                    redisService.getFeedAfterWithScores(userId, cursor, fetch);
+            List<RedisService.FeedEntry> entries =
+                    redisService.getMergedFeedAfter(userId, pullAuthorIds, cursor, fetch);
             if (entries.isEmpty()) break;
 
-            List<Long> postIds = entries.stream()
-                    .map(ZSetOperations.TypedTuple::getValue)
-                    .filter(Objects::nonNull)
-                    .map(id -> Long.valueOf(id.toString()))
-                    .toList();
+            List<Long> postIds = entries.stream().map(RedisService.FeedEntry::postId).toList();
 
             // batch 里还混有被转发的原帖，作者集合只取本批 feed 条目
             PostBatch batch = loadBatch(postIds, userId);
@@ -239,18 +238,15 @@ public class PostService {
 
             long advanced = cursor;
 
-            for (ZSetOperations.TypedTuple<Object> entry : entries) {
-                Object rawId = entry.getValue();
-                Double score = entry.getScore();
-                if (rawId == null || score == null) continue;
-
-                Long postId = Long.valueOf(rawId.toString());
+            for (RedisService.FeedEntry entry : entries) {
+                Long postId = entry.postId();
                 PostSnapshot post = batch.get(postId);
 
                 if (post == null) {
                     // 幽灵条目：帖子已删除。扇出在事务提交后才执行，
-                    // 这里查不到不会是"尚未提交"，可以放心清理。
-                    redisService.removeFromFeed(userId, postId);
+                    // 这里查不到不会是"尚未提交"，可以放心清理；发件箱里的要从发件箱删
+                    if (entry.outboxAuthorId() == null) redisService.removeFromFeed(userId, postId);
+                    else redisService.removeFromOutbox(entry.outboxAuthorId(), postId);
                 } else {
                     Long authorId = post.author().id();
                     boolean sameUser = authorId.equals(userId);
@@ -263,7 +259,7 @@ public class PostService {
                 }
 
                 // 幽灵条目同样推进游标，这是不死循环的关键
-                advanced = score.longValue();
+                advanced = entry.score();
 
                 if (result.size() >= size) break;
             }
@@ -272,7 +268,7 @@ public class PostService {
             if (advanced >= cursor) break;
             cursor = advanced;
 
-            // 本批不足 fetch，说明 ZSet 已取尽
+            // 归并后不足 fetch，说明收件箱和各发件箱都已取尽
             if (entries.size() < fetch) break;
         }
 
@@ -281,12 +277,17 @@ public class PostService {
 
     public List<PostResponse> getFollowingPosts(Long userId) {
 
-        String key = "feed:" + userId;
+        // 抽样范围：收件箱 + 关注的大 V 的发件箱
+        List<String> keys = new ArrayList<>();
+        keys.add("feed:" + userId);
+        for (Long authorId : followRepository.findPullFollowingIds(userId)) {
+            keys.add("outbox:" + authorId);
+        }
 
         // Step 1: Redis 随机抽样
         int size = 20;
         int sampleCount = size * 3;
-        List<Long> ids = redisService.getRandomZSetMembers(key, sampleCount);
+        List<Long> ids = redisService.getRandomZSetMembers(keys, sampleCount);
         if (ids.isEmpty()) return Collections.emptyList();
 
         // Step 2: 批量取快照（缓存未命中才查 DB）。抽样可能重复，这里按 id 去重

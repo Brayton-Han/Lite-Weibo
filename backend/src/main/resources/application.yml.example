@@ -53,6 +53,11 @@ r2:
 #   search:
 #     ef-search: 100        # HNSW 查询候选队列，越大召回越高、越慢（pgvector 默认 40）
 
+# feed 推拉结合（可选，以下为默认值）。粉丝数达到阈值的作者转为拉模式，且不再回退。
+# feed:
+#   pull:
+#     follower-threshold: 10000
+
 # 重排（可选，以下均为默认值）。与 embedding 共用 VOYAGE_API_KEY 与 base-url。
 # rerank:
 #   voyage:

@@ -21,6 +21,12 @@ public interface UserRepository extends JpaRepository<User, Long> {
     """)
     List<User> getAllUsers();
 
+    /** 转为拉模式（单向，见 V7 迁移）；在扇出的异步线程里调用，自带事务 */
+    @Modifying
+    @Transactional
+    @Query("UPDATE User u SET u.feedPull = true WHERE u.id = :id AND u.feedPull = false")
+    int markFeedPull(@Param("id") long id);
+
     @Modifying
     @Transactional
     @Query("UPDATE User u SET u.followCount = u.followCount + 1 WHERE u.id = :id")
