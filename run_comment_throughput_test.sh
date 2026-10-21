@@ -6,37 +6,13 @@ echo "🚀 Comment Queue 吞吐量测试工具"
 echo "=================================="
 echo ""
 echo "选择测试方式:"
-echo "1) Python Pika (快速，轻量级)"
-echo "2) Spring Boot (完整测试)"
-echo "3) RabbitMQ PerfTest (官方工具)"
+echo "1) Spring Boot (完整测试)"
+echo "2) RabbitMQ PerfTest (官方工具)"
 echo ""
-read -p "请选择 (1-3): " choice
+read -p "请选择 (1-2): " choice
 
 case $choice in
     1)
-        echo ""
-        echo "📦 检查 Python 依赖..."
-        python3 -m pip install pika > /dev/null 2>&1
-        
-        echo "⚙️  配置参数:"
-        read -p "吞吐量 (msg/sec, 默认 500): " throughput
-        throughput=${throughput:-500}
-        
-        read -p "测试时长 (秒, 默认 30): " duration
-        duration=${duration:-30}
-        
-        echo ""
-        echo "正在启动 Pika 测试... (吞吐量=$throughput, 时长=$duration 秒)"
-        echo ""
-        
-        # 修改脚本中的参数
-        sed -i '' "s/MESSAGES_PER_SECOND = [0-9]\+/MESSAGES_PER_SECOND = $throughput/" pika/test_comment_throughput.py
-        sed -i '' "s/DURATION_SECONDS = [0-9]\+/DURATION_SECONDS = $duration/" pika/test_comment_throughput.py
-        
-        python3 pika/test_comment_throughput.py
-        ;;
-        
-    2)
         echo ""
         echo "⚙️  配置参数:"
         read -p "吞吐量 (msg/sec, 默认 1000): " throughput
@@ -71,7 +47,7 @@ case $choice in
         cd ..
         ;;
         
-    3)
+    2)
         echo ""
         echo "🔗 需要先安装 RabbitMQ PerfTest:"
         echo ""

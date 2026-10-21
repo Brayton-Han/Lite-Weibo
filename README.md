@@ -28,7 +28,7 @@ Beyond the usual social features, the project focuses on two things:
 - **Frontend**: Next.js 16, React 19, TypeScript, Tailwind CSS 4, Axios, STOMP.js / SockJS
 - **Storage & middleware**: PostgreSQL 15 + pgvector / pg_trgm, Redis 7 (AOF), RabbitMQ 3, Cloudflare R2 (images)
 - **AI**: Voyage AI (`voyage-4` embeddings, `rerank-3` reranking), Claude (official `anthropic-java` SDK, default model `claude-haiku-5-5`)
-- **Load testing**: Python Pika (`pika/`), comment-queue throughput runner
+- **Load testing**: comment-queue throughput runner (`TEST_MODE=comment-throughput`), RabbitMQ PerfTest
 
 ---
 
@@ -204,7 +204,6 @@ corpus/       Synthetic part of the eval corpus (manifest.jsonl, 2,100 posts); t
               is rebuilt locally from the Leiden Weibo Corpus (CC BY-NC-SA, not redistributed)
 eval/         Labeled sets (train / test / intent), labeling guide, agreement notes, results
 tools/        Corpus synthesis and eval-set construction scripts
-pika/         RabbitMQ throughput / latency test scripts
 docs/         Design and evaluation docs
 ```
 

@@ -4,7 +4,7 @@
 
 - `backend/`: Java 21 / Spring Boot application. Sources live under `src/main/java/com/brayton/weibo/`, organized into controllers, services, repositories, entities, DTOs, configuration, and events. Keep business logic in services and persistence in repositories. Runtime configuration lives in `src/main/resources/application.properties`.
 - `frontend/`: Next.js 16, React 19, TypeScript, and Tailwind CSS. Routes live in `src/app/`, reusable UI in `src/components/`, API helpers in `src/lib/`, shared types in `src/types/`, and static assets in `public/`.
-- `pika/` and `backend/src/main/java/com/brayton/weibo/test/`: queue throughput tools. Markdown guides in `docs/` document architecture, schemas, concurrency, and performance testing.
+- `backend/src/main/java/com/brayton/weibo/test/`: comment-queue throughput runner. Markdown guides in `docs/` document architecture, schemas, concurrency, and performance testing.
 - `docker-compose.yml`: PostgreSQL, Redis, RabbitMQ, backend, and frontend services.
 
 ## Build, Test, and Development Commands

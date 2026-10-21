@@ -16,19 +16,7 @@ cd Lite-Weibo
 
 ---
 
-### 方式2：直接使用 Pika（最快）
-
-```bash
-cd pika
-pip install pika
-python test_comment_throughput.py
-```
-
-**预期耗时：30 秒** ✅
-
----
-
-### 方式3：使用 Spring Boot（完整测试）
+### 方式2：使用 Spring Boot（完整测试）
 
 ```bash
 # 确保 Docker 服务已启动
@@ -63,13 +51,6 @@ TEST_MODE=comment-throughput mvn spring-boot:run
 ---
 
 ## 🔧 调整测试参数
-
-### Pika 脚本
-编辑 `pika/test_comment_throughput.py`:
-```python
-MESSAGES_PER_SECOND = 1000  # 改为需要的吞吐量
-DURATION_SECONDS = 60       # 改为需要的时长
-```
 
 ### Spring Boot
 使用环境变量：
@@ -153,7 +134,7 @@ docker-compose restart backend
 更详细的测试指南请查看：[COMMENT_QUEUE_THROUGHPUT_TEST.md](./COMMENT_QUEUE_THROUGHPUT_TEST.md)
 
 包含内容：
-- ✅ 三种压测方式详细对比
+- ✅ 两种压测方式详细对比
 - ✅ 性能监控和调优建议
 - ✅ 问题排查指南
 - ✅ 压测场景建议
@@ -162,10 +143,9 @@ docker-compose restart backend
 
 ## 💡 Tips
 
-1. **首次测试** → 用 Pika 脚本，快速验证
-2. **完整测试** → 用 Spring Boot，模拟真实场景
-3. **性能压测** → 用 PerfTest，专业工具
-4. **持续监控** → 定期运行测试，对比历史数据
+1. **完整测试** → 用 Spring Boot，模拟真实场景
+2. **性能压测** → 用 PerfTest，专业工具
+3. **持续监控** → 定期运行测试，对比历史数据
 
 ---
 
