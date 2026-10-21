@@ -11,6 +11,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.ResourceAccessException;
+import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
 
@@ -156,6 +157,13 @@ public class VoyageEmbeddingClient implements EmbeddingClient {
             } catch (ResourceAccessException e) {
                 if (attempt >= maxAttempts) {
                     throw new EmbeddingException("Voyage 网络错误，重试 " + attempt + " 次后放弃", e);
+                }
+                backoff(attempt, -1, false, e.getClass().getSimpleName());
+            } catch (RestClientException e) {
+                // 拿到响应头之后、读响应体时超时（读超时打在 body 上）或响应体解析失败：不是上面两类，
+                // 不接住就会以 500 冒出去、绕过调用方的降级（Day 17 实测 rerank 超时把语义搜索打成了 500）
+                if (attempt >= maxAttempts) {
+                    throw new EmbeddingException("Voyage 读取响应失败，重试 " + attempt + " 次后放弃：" + e.getMessage(), e);
                 }
                 backoff(attempt, -1, false, e.getClass().getSimpleName());
             }

@@ -1,5 +1,6 @@
 package com.brayton.weibo.controller;
 
+import lombok.extern.slf4j.Slf4j;
 import com.brayton.weibo.config.security.CustomUserDetails;
 import com.brayton.weibo.dto.ApiResponse;
 import com.brayton.weibo.dto.UserResponse;
@@ -13,6 +14,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
+@Slf4j
 @RestController
 @AllArgsConstructor
 public class FollowController {
@@ -36,7 +38,7 @@ public class FollowController {
             @RequestParam(defaultValue = "10") int size,
             @RequestParam(required = false) Long lastId
     ) {
-        System.out.println("size: " + size +  " lastId: " + lastId);
+        log.debug("关注列表分页 size={} lastId={}", size, lastId);
         List<UserResponse> followerList = followService.getFollowers(id, lastId, size);
         return ResponseEntity.ok(ApiResponse.success(followerList));
     }

@@ -80,6 +80,26 @@ r2:
 #   refusal:
 #     min-top1-score: 0.40  # 低于它直接拒答、不调模型
 
+# Day 17 的限流 / 熔断 / 超时 / 缓存 / Actuator 默认值在 application.properties（入库），这里只列常改的几项：
+# claude:
+#   max-retries: 1             # 线上；tools profile 为 2
+#   intent:
+#     timeout-ms: 8000         # 单次调用超时，SDK 会把超时当网络错误重试
+#   generation:
+#     timeout-ms: 30000        # 流式时覆盖整个响应体
+# ratelimit:
+#   enabled: true              # Redis 令牌桶；Redis 不可用时放行
+#   ask: { capacity: 20, period: 1h }       # 被限后问答降级成检索结果
+#   search: { capacity: 60, period: 1m }    # 语义搜索 / 检索详情，被限回 429
+# ai:
+#   budget:
+#     daily-usd: 5.0           # 当日（UTC）Claude 花费阈值，或环境变量 AI_BUDGET_DAILY_USD
+# ask:
+#   cache:
+#     ttl: 30m
+#   degrade:
+#     enabled: true            # false 时 Claude / Voyage 失败直接报错（评测用）
+
 # ─────────────────────────────────────────────────────────────
 # 用法：cp application.yml.example application.yml，填入真实值。
 #

@@ -18,8 +18,10 @@ public class ClaudeCallException extends RuntimeException {
         RATE_LIMITED(true),
         /** 5xx / 529 overloaded：上游故障 */
         UPSTREAM(true),
-        /** 拿到响应之前就断了：DNS、连接、超时 */
+        /** 拿到响应之前就断了：DNS、连接 */
         NETWORK(true),
+        /** 超过这次调用的超时（含流式读到一半超时），见 {@code ClaudeGateway} */
+        TIMEOUT(true),
         /** HTTP 200 但结果不可用：被截断（max_tokens）、拒答（refusal）、缺字段 */
         BAD_RESPONSE(false);
 

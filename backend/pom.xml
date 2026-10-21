@@ -99,6 +99,15 @@
     		<groupId>org.flywaydb</groupId>
     		<artifactId>flyway-database-postgresql</artifactId>
 		</dependency>
+        <!-- 可观测（RAG Day 17）：/actuator/metrics 与 /actuator/prometheus -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
         <dependency>
             <groupId>com.anthropic</groupId>
             <artifactId>anthropic-java</artifactId>

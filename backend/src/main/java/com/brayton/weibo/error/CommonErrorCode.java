@@ -26,6 +26,7 @@ public enum CommonErrorCode implements ErrorCode {
     SEARCH_QUERY_INVALID(1800, "search query must be 1-200 characters"),
     SEMANTIC_SEARCH_UNAVAILABLE(1801, "semantic search is temporarily unavailable, please retry"),
     ASK_UNAVAILABLE(1802, "AI answer is temporarily unavailable, please retry"),
+    RATE_LIMITED(1803, "too many requests, please retry later"),
 
     TOKEN_EXPIRED(2001, "Token expired"),
 

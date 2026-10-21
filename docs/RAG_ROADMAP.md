@@ -1525,24 +1525,44 @@ D: 0        + 1/(60+2) = 0.01613
 
 ### 🛠 开发 checklist
 
-- [ ] **限流**：Redis 令牌桶，按 userId 维度（如 20 次/小时），顺手补上 §6.3-24
-- [ ] **成本熔断**：日消耗超过阈值自动关闭 AI 回答功能，只保留检索
-- [ ] **降级**：Claude API 不可用时返回检索结果 + 提示"AI 回答暂不可用"，**不返回 500**
-- [ ] **超时**：给生成层设合理超时，别让请求线程挂死
-- [ ] **rerank 接入线上**（Day 12 决定上，当时只接了 eval）：语义搜索接口包一层 `RerankStrategy`（base 为 Day 11 的 rrf，候选 30），
-  `fallbackOnError = true`——Voyage 超时（2s）或报错时退回 rrf 排序，不返回 500；埋点 rerank 延迟与降级次数
-- [ ] **可观测**：引入 Actuator + Micrometer（顺手补 §6.3-22），埋点：
-  - 检索延迟（分路：词面 / 向量 / 融合）
-  - 生成延迟、token 用量、缓存命中率
-  - 拒答率、限流触发次数
-  - 每日成本累计
-- [ ] **缓存热门 query**：相同 query 的结果进 Redis（带 TTL），省钱又快
-- [ ] 结构化日志，用 SLF4J 替换项目里的 `System.out.println`
+- [x] **限流**：Redis 令牌桶，按 userId 维度（如 20 次/小时），顺手补上 §6.3-24——2026-10-20 完成：`ratelimit/RateLimiter`（Lua 脚本，时间取 Redis `TIME`，
+      桶在补满后过期）。两条策略：`ask` 20 次 / 小时，被限后**降级而不是报错**（`DEGRADED / RATE_LIMITED` + `retryAfterSeconds`，且不再调任何外部服务）；
+      `search`（语义搜索、检索详情）60 次 / 分钟，被限回 429 + `Retry-After`。限流按请求计、放在缓存之前，缓存命中也扣令牌。
+      Redis 不可用时放行（fail-open）。§6.3-24 的按 IP 维度没做
+- [x] **成本熔断**：日消耗超过阈值自动关闭 AI 回答功能，只保留检索——2026-10-20 完成：`service/AiBudgetService`，`ClaudeGateway` 每次成功调用后回调，
+      按价目表（2026-10-20 核对，不认识的模型按最贵一档）折成微美元累加到 Redis `ai:cost:yyyy-MM-dd`（UTC），阈值 `ai.budget.daily-usd` 默认 5 美元。
+      只算 Claude，Voyage 属于检索。软上限：在途请求会略微超出。Redis 读不到时**按已熔断处理**（fail-closed，与限流相反）。缓存命中不受熔断影响
+- [x] **降级**：Claude API 不可用时返回检索结果 + 提示"AI 回答暂不可用"，**不返回 500**——2026-10-20 完成：`AskResponse` 新增 `DEGRADED`
+      （原因：RATE_LIMITED / BUDGET_EXHAUSTED / AI_UNAVAILABLE / AI_TIMEOUT / SEARCH_UNAVAILABLE / OVERLOADED）。
+      **和 Day 14 的硬要求冲突**：意图未知时给帖子，风险类就可能看到帖子。解法是本地风险词表 `RiskKeywordGuard`，命中按风险类只给热线。
+      ⚠️ 词表在留出集上召回 13/19（分类器 19/19），降级时约三分之一的风险类 query 会看到帖子，见 EVAL.md「Day 17 · 风险词表」。
+      分类成功但生成失败时，直接把已检索到的帖子返回。前端 `AskPanel` 加降级卡片，`SearchResults` 在降级时照常展示帖子。
+      评测（tools profile）关闭降级、缓存、限流、熔断，失败照旧报错
+- [x] **超时**：给生成层设合理超时，别让请求线程挂死——2026-10-20 完成：`ClaudeGateway` 按调用传 `RequestOptions.timeout`（OkHttp callTimeout，流式时覆盖整个响应体），
+      意图 8s、生成 30s，线上重试改为 1 次；超时单独归为 `ClaudeCallException.Kind.TIMEOUT` → `AI_TIMEOUT`。SSE 超时从 180s 收到 90s
+- [x] **rerank 接入线上**（Day 12 决定上，当时只接了 eval）：语义搜索接口包一层 `RerankStrategy`（base 为 Day 11 的 rrf，候选 30），
+  `fallbackOnError = true`——Voyage 超时（2s）或报错时退回 rrf 排序，不返回 500；埋点 rerank 延迟与降级次数——2026-10-20 完成：`config/SearchConfig`，
+  `service/SemanticSearchService`（`/posts/search/semantic` 与共鸣类"相关帖子"都走它），词面 / 向量两路在新的 `searchTaskExecutor` 上并行。
+  **经验类问答没接**：拒答阈值是按纯向量 top-1 校准的，换 rerank 分数要在 train 上重新校准。
+  实测发现 `VoyageReranker` / `VoyageEmbeddingClient` 漏接读响应体超时的 `RestClientException`，降级被绕过成了 500，已修
+- [x] **可观测**：引入 Actuator + Micrometer（顺手补 §6.3-22），埋点——2026-10-20 完成，管理端口 8081（compose 只绑 127.0.0.1），指标清单见 EVAL.md「Day 17 · 线上保护的实测」：
+  - 检索延迟（分路：词面 / 向量 / 融合）→ `search.retrieval.latency{stage}`，另有 `rerank.latency`
+  - 生成延迟、token 用量、缓存命中率 → `claude.calls`、`claude.tokens`、`claude.prompt.cache.hit.ratio`
+  - 拒答率、限流触发次数 → `ask.outcomes{mode,detail}`、`ratelimit.decisions{result=rejected}`
+  - 每日成本累计 → `ai.cost.today.usd`（Redis，多实例共享）、`ai.cost.usd`（进程内）
+- [x] **缓存热门 query**：相同 query 的结果进 Redis（带 TTL），省钱又快——2026-10-20 完成：`service/AskCache`，key 为归一化 query + 检索配置的 SHA-256，TTL 30 分钟。
+      只存与用户无关的部分（意图、回答、postId），帖子卡片命中时按当前用户重新加载，被删的帖子不会复活。降级、FILTERED、NO_DOCS 不缓存。实测 7.2s → 0.04s
+- [x] 结构化日志，用 SLF4J 替换项目里的 `System.out.println`——2026-10-20 完成：线上路径（WebSocket 握手、通知、上传、关注、feed 回灌）全部换掉；
+      `tools/` 与吞吐压测的 `System.out` 是命令行工具的终端报告，保留。`TraceIdFilter` 往 MDC 放 traceId / userId（响应头 `X-Trace-Id`），
+      通过 TaskDecorator 带进 ask / search 线程池；docker-compose 开 `LOGGING_STRUCTURED_FORMAT_CONSOLE=logstash` 出 JSON 日志
 
 ### ✅ 验收标准
 - 把 `ANTHROPIC_API_KEY` 改成错的，搜索功能**仍然可用**，只是没有 AI 回答
 - 快速连点 30 次，第 21 次开始被限流
 - Actuator 端点能看到上述指标
+
+——2026-10-20：三条都用真实 API 验过（见 EVAL.md「Day 17 · 线上保护的实测」）：错 key 下全部 200、无 500，普通 query 降级成语义搜索结果，风险类仍只给热线；
+连发 30 次第 21 次起 `RATE_LIMITED`；Actuator 上上述指标全部可见。前端降级卡片只过了类型检查，**浏览器里的展示由用户手动验收**
 
 ### 💬 面试钩子
 > "我做的第一个降级设计是：Claude 挂了，搜索还能用。

@@ -32,13 +32,18 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * error   {"code": 1802, "message": "..."}                   与非流式接口的错误码一致
  * </pre>
  * result 和 error 二选一，发完即关闭连接。用户关掉页面后下一次推送失败，生成随之中止，不再为没人看的回答付输出 token。
+ * <p>Day 17 起降级（被限流、熔断、Claude 不可用 / 超时、线程池已满）都走 {@code result}（mode = DEGRADED），
+ * error 只剩 query 不合法和意料之外的异常。
  */
 @Slf4j
 @RestController
 public class AskStreamController {
 
-    /** 生成本身 7s 左右，SDK 超时 60s、重试 2 次；再长就是挂住了 */
-    private static final long TIMEOUT_MS = 180_000;
+    /**
+     * 正常 10s 内结束。上限按最坏情况算：分类 8s × 2 次 + 生成 30s（流式读到一半超时不重试，但连接阶段的超时会重试一次）× 2，
+     * 约 76s，再留点余量；超过就是挂住了
+     */
+    private static final long TIMEOUT_MS = 90_000;
 
     private final AskService askService;
     private final TaskExecutor executor;
@@ -60,25 +65,23 @@ public class AskStreamController {
         try {
             executor.execute(() -> run(emitter, closed, q, selfId));
         } catch (TaskRejectedException e) {
-            log.warn("流式问答线程池已满，拒绝请求");
-            sendError(emitter, closed, CommonErrorCode.ASK_UNAVAILABLE.getCode(), CommonErrorCode.ASK_UNAVAILABLE.getMessage());
+            log.warn("流式问答线程池已满，降级");
+            // 请求线程上只做本地的风险词表判断，不调外部服务
+            try {
+                send(emitter, closed, "result", askService.overloaded(q, selfId, listener(emitter, closed)));
+                emitter.complete();
+            } catch (WeiboException ex) {
+                sendError(emitter, closed, ex.getCode(), ex.getMessage());
+            } catch (UncheckedIOException ex) {
+                emitter.completeWithError(ex);
+            }
         }
         return emitter;
     }
 
     private void run(SseEmitter emitter, AtomicBoolean closed, String q, Long selfId) {
         try {
-            AskResponse result = askService.askStreaming(q, selfId, new AskService.AskListener() {
-                @Override
-                public void onIntent(QueryIntent intent) {
-                    send(emitter, closed, "intent", Map.of("intent", intent));
-                }
-
-                @Override
-                public void onDelta(String text) {
-                    send(emitter, closed, "delta", Map.of("text", text));
-                }
-            });
+            AskResponse result = askService.askStreaming(q, selfId, listener(emitter, closed));
             send(emitter, closed, "result", result);
             emitter.complete();
         } catch (WeiboException e) {
@@ -91,6 +94,20 @@ public class AskStreamController {
             log.error("流式问答失败", e);
             sendError(emitter, closed, CommonErrorCode.ASK_UNAVAILABLE.getCode(), CommonErrorCode.ASK_UNAVAILABLE.getMessage());
         }
+    }
+
+    private static AskService.AskListener listener(SseEmitter emitter, AtomicBoolean closed) {
+        return new AskService.AskListener() {
+            @Override
+            public void onIntent(QueryIntent intent) {
+                send(emitter, closed, "intent", Map.of("intent", intent));
+            }
+
+            @Override
+            public void onDelta(String text) {
+                send(emitter, closed, "delta", Map.of("text", text));
+            }
+        };
     }
 
     /** 推送失败（连接已断、已超时）抛 {@link UncheckedIOException}，从回调里一路抛出去中止生成 */

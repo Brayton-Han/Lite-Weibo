@@ -121,10 +121,14 @@ export interface NotificationItem {
 
 export type QueryIntent = 'EXPERIENCE' | 'RESONANCE' | 'RISK';
 
-export type AskMode = 'ANSWER' | 'NO_ANSWER' | 'RESONANCE' | 'RISK';
+export type AskMode = 'ANSWER' | 'NO_ANSWER' | 'RESONANCE' | 'RISK' | 'DEGRADED';
 
 // 拒答发生在哪一层：检索分数不够 / 没有可用帖子 / 模型自己拒答 / 输出过滤拦截
 export type AskRefusal = 'LOW_SCORE' | 'NO_DOCS' | 'MODEL' | 'FILTERED';
+
+// AI 回答这次为什么不可用（Day 17 降级）：被限流 / 当日花费到阈值 / Claude 失败或超时 / 向量检索不可用 / 问答线程池满
+export type AskDegradation =
+  | 'RATE_LIMITED' | 'BUDGET_EXHAUSTED' | 'AI_UNAVAILABLE' | 'AI_TIMEOUT' | 'SEARCH_UNAVAILABLE' | 'OVERLOADED';
 
 export interface Citation {
   ref: number;        // 角标编号，从 1 开始
@@ -170,6 +174,9 @@ export interface AskResponse {
   message: string | null;
   refusal: AskRefusal | null;
   helplines: Helpline[] | null;
+  degradation: AskDegradation | null;
+  retryAfterSeconds: number | null;
+  cached: boolean;   // 来自问答缓存，这次没有调用模型
 }
 
 // --- 检索详情面板（/posts/search/retrieval），对应后端 RetrievalDetailResponse ---

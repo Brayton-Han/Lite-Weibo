@@ -1,8 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { AlertCircle, HeartHandshake, Loader2, Phone, SearchX, Sparkles } from 'lucide-react';
-import { AskRefusal, AnswerSegment, Citation, CitedAnswer, Post } from '@/types';
+import { AlertCircle, CloudOff, HeartHandshake, Loader2, Phone, SearchX, Sparkles } from 'lucide-react';
+import { AskDegradation, AskRefusal, AnswerSegment, Citation, CitedAnswer, Post } from '@/types';
 import { AskState } from '@/lib/useAskStream';
 import PostCard from './PostCard';
 
@@ -17,6 +17,18 @@ const REFUSAL_HINT: Record<AskRefusal, string> = {
   MODEL: 'Related posts were found, but none of them actually answers this question.',
   FILTERED: 'The generated answer was withheld by a safety filter.',
 };
+
+const DEGRADATION_HINT: Record<AskDegradation, string> = {
+  RATE_LIMITED: "You've asked a lot in the last hour.",
+  BUDGET_EXHAUSTED: "Today's AI budget has been used up.",
+  AI_UNAVAILABLE: 'The AI service is not responding right now.',
+  AI_TIMEOUT: 'The AI took too long to answer.',
+  SEARCH_UNAVAILABLE: 'Semantic search is temporarily unavailable.',
+  OVERLOADED: 'Too many questions are being answered right now.',
+};
+
+const formatWait = (seconds: number) =>
+  seconds < 60 ? `${seconds}s` : `${Math.ceil(seconds / 60)} min`;
 
 interface AskPanelProps {
   state: AskState;
@@ -53,6 +65,23 @@ export default function AskPanel({ state, currentUserId, hasKeywordResults }: As
 
   if (result?.mode === 'RISK') return <RiskCard message={result.message} helplines={result.helplines ?? []} />;
 
+  // 降级：AI 回答这次不可用，下面照常给帖子（流式中途降级时，已推出的文本被这张卡片替换）
+  if (result?.mode === 'DEGRADED') {
+    return (
+      <div className="bg-white rounded-xl shadow p-4 mb-4 flex items-start gap-3 text-sm">
+        <CloudOff size={18} className="text-amber-500 flex-shrink-0 mt-0.5" />
+        <div>
+          <p className="font-medium text-gray-900">{result.message || 'AI 回答暂不可用'}</p>
+          <p className="mt-0.5 text-gray-500">
+            {result.degradation ? DEGRADATION_HINT[result.degradation] : ''}
+            {result.retryAfterSeconds ? ` Try again in ${formatWait(result.retryAfterSeconds)}.` : ''}
+            {' '}Search results are still shown below.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   if (result?.mode === 'RESONANCE' || (intent && intent !== 'EXPERIENCE')) return null;
 
   if (result?.mode === 'NO_ANSWER') {
@@ -76,6 +105,9 @@ export default function AskPanel({ state, currentUserId, hasKeywordResults }: As
       <div className="flex items-center gap-2 text-sm font-semibold text-blue-700 mb-3">
         <Sparkles size={16} />
         AI Answer
+        {phase === 'done' && result?.cached && (
+          <span className="ml-auto text-xs font-normal text-gray-400">cached</span>
+        )}
         {phase !== 'done' && (
           <span className="ml-auto flex items-center text-xs font-normal text-gray-400">
             <Loader2 size={12} className="animate-spin mr-1" />

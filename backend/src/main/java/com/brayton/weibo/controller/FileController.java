@@ -1,5 +1,6 @@
 package com.brayton.weibo.controller;
 
+import lombok.extern.slf4j.Slf4j;
 import com.brayton.weibo.dto.ApiResponse;
 import com.brayton.weibo.error.CommonErrorCode;
 import com.brayton.weibo.error.WeiboException;
@@ -13,6 +14,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 
+@Slf4j
 @RestController
 public class FileController {
 
@@ -26,7 +28,7 @@ public class FileController {
     public ResponseEntity<ApiResponse<?>> uploadImages(
             @RequestParam("file") List<MultipartFile> files
     ) {
-        System.out.println("File upload start...");
+        log.debug("文件上传开始");
         // 空文件列表（前端会避免，但保险）
         if (files == null || files.isEmpty()) {
             throw new WeiboException(CommonErrorCode.FILE_LIST_NULL);

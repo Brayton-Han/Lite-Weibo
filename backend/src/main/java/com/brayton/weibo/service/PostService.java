@@ -4,8 +4,6 @@ import com.brayton.weibo.common.ChineseUtil;
 import com.brayton.weibo.common.FeedRandomizer;
 import com.brayton.weibo.common.TimeUtil;
 import com.brayton.weibo.dto.*;
-import com.brayton.weibo.embedding.EmbeddingClient;
-import com.brayton.weibo.embedding.EmbeddingException;
 import com.brayton.weibo.entity.Like;
 import com.brayton.weibo.entity.Post;
 import com.brayton.weibo.entity.User;
@@ -15,6 +13,7 @@ import com.brayton.weibo.error.CommonErrorCode;
 import com.brayton.weibo.error.WeiboException;
 import com.brayton.weibo.event.LikeEvent;
 import com.brayton.weibo.event.PostEmbeddingEvent;
+import com.brayton.weibo.retrieval.ScoredPost;
 import com.brayton.weibo.event.PostFanOutEvent;
 import com.brayton.weibo.repository.*;
 import com.brayton.weibo.service.PostCacheService.Counter;
@@ -45,14 +44,12 @@ public class PostService {
     private final RedisService redisService;
     private final WebSocketPusher wsPusher;
     private final ApplicationEventPublisher publisher;
-    private final EmbeddingClient embeddingClient;
-    private final PostEmbeddingRepository embeddingRepository;
     private final PostLexicalSearchRepository lexicalSearchRepository;
     private final PostCacheService postCache;
     private final LikeCountService likeCountService;
 
+    /** 语义搜索 / 问答 / 检索详情共用的 query 长度上限 */
     public static final int SEMANTIC_QUERY_MAX_LENGTH = 200;
-    public static final int SEMANTIC_MAX_K = 50;
 
     /**
      * 根据 post 构建完整响应
@@ -499,32 +496,13 @@ public class PostService {
     }
 
     /**
-     * 纯向量语义搜索（RAG Day 6，临时端点，供 Phase 2 打分前人工感受效果）。
-     *
-     * 只返回 top-k、不分页：ANN 的结果没有稳定的游标可言，翻页需要按分数做 keyset，
-     * 等 Phase 3 混合检索定型后再设计。分数一并返回，便于对比不同查询的结果。
+     * 把检索结果组装成带分数的帖子，按 hits 的顺序。供 {@link SemanticSearchService} 和问答降级时用。
+     * 检索与加载之间帖子可能刚被删或改为非公开：@Where 会滤掉已删除的，可见性这里再判一次
      */
-    public List<ScoredPostResponse> getSemanticSearchResults(String query, int k, Long selfId) {
-        String q = query == null ? "" : query.strip();
-        if (q.isEmpty() || q.length() > SEMANTIC_QUERY_MAX_LENGTH) {
-            throw new WeiboException(CommonErrorCode.SEARCH_QUERY_INVALID);
-        }
-        k = Math.max(1, Math.min(k, SEMANTIC_MAX_K));
-
-        float[] vector;
-        try {
-            vector = embeddingClient.embedQuery(q);
-        } catch (EmbeddingException e) {
-            log.warn("语义搜索查询向量化失败：{}", e.getMessage());
-            throw new WeiboException(CommonErrorCode.SEMANTIC_SEARCH_UNAVAILABLE);
-        }
-
-        List<PostEmbeddingRepository.Hit> hits = embeddingRepository.searchNearest(vector, embeddingClient.modelId(), k);
-        PostBatch batch = loadBatch(hits.stream().map(PostEmbeddingRepository.Hit::postId).toList(), selfId);
-
-        // 按相似度顺序组装。检索与加载之间帖子可能刚被删或改为非公开：@Where 会滤掉已删除的，可见性这里再判一次
+    public List<ScoredPostResponse> toScoredResponses(List<ScoredPost> hits, Long selfId) {
+        PostBatch batch = loadBatch(hits.stream().map(ScoredPost::postId).toList(), selfId);
         List<ScoredPostResponse> result = new ArrayList<>(hits.size());
-        for (PostEmbeddingRepository.Hit hit : hits) {
+        for (ScoredPost hit : hits) {
             PostSnapshot post = batch.get(hit.postId());
             if (post == null || post.visibility() != PostVisibility.PUBLIC) {
                 continue;

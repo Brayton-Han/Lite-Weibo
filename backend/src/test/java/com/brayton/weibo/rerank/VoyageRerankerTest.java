@@ -143,6 +143,17 @@ class VoyageRerankerTest {
     }
 
     @Test
+    void unreadableResponseBodyBecomesRerankExceptionSoCallersCanFallBack() {
+        // 状态 200 但响应体读不出来（线上是读超时打在 body 上，这里用坏 JSON 走同一条 RestClientException 路径）
+        server.expect(ExpectedCount.twice(), requestTo(URL))
+                .andRespond(withSuccess("{\"data\": [", MediaType.APPLICATION_JSON));
+
+        assertThatThrownBy(() -> online().rerank("q", CANDIDATES, 2))
+                .isInstanceOf(RerankException.class).hasMessageContaining("读取响应失败");
+        server.verify();
+    }
+
+    @Test
     void onlineRetries5xxOnceThenGivesUp() {
         server.expect(ExpectedCount.twice(), requestTo(URL)).andRespond(withStatus(HttpStatus.BAD_GATEWAY));
 

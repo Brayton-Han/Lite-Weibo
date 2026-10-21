@@ -1,10 +1,12 @@
 package com.brayton.weibo.service;
 
 import com.brayton.weibo.dto.AskResponse;
+import com.brayton.weibo.dto.AskResponse.Degradation;
 import com.brayton.weibo.dto.AskResponse.Helpline;
 import com.brayton.weibo.dto.AskResponse.Mode;
 import com.brayton.weibo.dto.AskResponse.Refusal;
 import com.brayton.weibo.dto.PostResponse;
+import com.brayton.weibo.dto.ScoredPostResponse;
 import com.brayton.weibo.embedding.EmbeddingClient;
 import com.brayton.weibo.embedding.EmbeddingException;
 import com.brayton.weibo.error.CommonErrorCode;
@@ -15,16 +17,25 @@ import com.brayton.weibo.generation.ClaudeCallException;
 import com.brayton.weibo.generation.IntentClassifier;
 import com.brayton.weibo.generation.PromptLeakGuard;
 import com.brayton.weibo.generation.QueryIntent;
+import com.brayton.weibo.generation.RiskKeywordGuard;
 import com.brayton.weibo.generation.SourceDoc;
 import com.brayton.weibo.generation.SourceDocLoader;
+import com.brayton.weibo.ratelimit.RateLimitPolicies;
+import com.brayton.weibo.ratelimit.RateLimiter;
 import com.brayton.weibo.repository.PostEmbeddingRepository;
 import com.brayton.weibo.retrieval.ScoredPost;
+import com.brayton.weibo.retrieval.TimedStrategy;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 站内问答（RAG Day 14）：先分意图，再决定走哪条路，三种情况分别闭嘴。
@@ -38,7 +49,8 @@ import java.util.Objects;
  * <h3>阈值为什么是向量 top-1 余弦</h3>
  * Day 14 在 train 集上比过（EVAL.md「Day 14 · 拒答阈值」）：RRF 分数只由名次决定，可答与无答案的 top-1 都是 0.909，没有信号；
  * top-1 与 top-10 / 均值的分差这类相对判据，无答案 query 并不比可答的小。只有向量 top-1 有区分度。
- * 阈值是针对 {@code voyage-4} 校准的，换 embedding 模型或检索方案（如 Day 17 接 rerank）必须重新校准。
+ * 阈值是针对 {@code voyage-4} 校准的，换 embedding 模型或检索方案必须重新校准——所以 Day 17 接的 rerank
+ * 只用于共鸣类的"相关帖子"（{@link SemanticSearchService}），经验类仍走纯向量。
  *
  * <h3>为什么偏向少拒</h3>
  * 阈值只是第一道、省钱的一道：漏过去的无答案 query 还有生成层规则 3（"站内没有找到相关讨论"）兜着，代价是一次调用；
@@ -55,15 +67,30 @@ import java.util.Objects;
  * 输出过滤不能等到最后：每段文本推出去之前先对累计文本跑 {@link PromptLeakGuard}，命中就中止生成，
  * 保证推给用户的文本里从来没出现过完整的泄露片段。
  *
- * <h3>失败</h3>
- * 意图分类失败时不猜类别、不降级成搜索结果（风险类 query 可能因此看到一堆同样绝望的帖子），直接报不可用。
- * 生成失败同样报不可用；"Claude 挂了退回纯检索"留给 Day 17 的降级设计。
+ * <h3>Day 17：限流 → 缓存 → 熔断 → 分类</h3>
+ * <ol>
+ *   <li>限流（{@link RateLimiter}，默认每人 20 次 / 小时）放在最前面，按请求计而不是按花费计：缓存命中也消耗令牌</li>
+ *   <li>缓存（{@link AskCache}）：命中直接返回，不调模型；熔断之后缓存里的结果照常可用</li>
+ *   <li>成本熔断（{@link AiBudgetService}）：当日花费到阈值后不再调 Claude</li>
+ * </ol>
+ *
+ * <h3>降级：Claude 挂了，搜索还能用</h3>
+ * 这个功能的核心价值是检索，AI 回答是增强不是依赖。被限流、熔断、Claude 调用失败或超时、Voyage 不可用，
+ * 都返回 {@code DEGRADED}：提示"AI 回答暂不可用"，带上能拿到的检索结果，不报错、不返回 500。
+ * <p>
+ * 难点在 Day 14 的硬要求：风险类 query 不能看到帖子。意图未知时（分类前就降级、或分类本身失败）先过本地风险词表
+ * {@link RiskKeywordGuard}，命中按风险类处理，没命中才给检索结果。词表召回比分类器低，这是"降级时搜索可用"的代价，
+ * 量化结果见 EVAL.md「Day 17 · 风险词表」。分类器可用时词表不参与路由。
+ * <p>
+ * 评测（tools profile）把 {@code ask.degrade.enabled} 关掉：静默降级会让指标混进检索结果，必须失败得明明白白，与 rerank 的 fallbackOnError 同一口径。
  */
 @Slf4j
 @Service
 public class AskService {
 
     static final String NO_ANSWER_MESSAGE = "站内没有找到相关讨论";
+
+    static final String DEGRADED_MESSAGE = "AI 回答暂不可用，先看看相关帖子";
 
     static final String RISK_MESSAGE = """
             听起来你现在真的很难受。你不需要一个人扛着——现在就可以打给下面的热线，和专业的人聊一聊。
@@ -83,25 +110,44 @@ public class AskService {
     private final AnswerGenerator generator;
     private final SourceDocLoader docLoader;
     private final PostService postService;
+    private final SemanticSearchService semanticSearch;
     private final EmbeddingClient embeddingClient;
     private final PostEmbeddingRepository embeddingRepository;
+    private final RateLimiter rateLimiter;
+    private final RateLimitPolicies policies;
+    private final AskCache cache;
+    private final AiBudgetService budget;
+    private final MeterRegistry meters;
     private final double minTop1Score;
     private final int topK;
+    private final boolean degradeEnabled;
+    private final Timer vectorTimer;
 
     public AskService(
             IntentClassifier classifier, AnswerGenerator generator, SourceDocLoader docLoader, PostService postService,
-            EmbeddingClient embeddingClient, PostEmbeddingRepository embeddingRepository,
+            SemanticSearchService semanticSearch, EmbeddingClient embeddingClient, PostEmbeddingRepository embeddingRepository,
+            RateLimiter rateLimiter, RateLimitPolicies policies, AskCache cache, AiBudgetService budget, MeterRegistry meters,
             @Value("${ask.refusal.min-top1-score:0.40}") double minTop1Score,
-            @Value("${ask.top-k:10}") int topK
+            @Value("${ask.top-k:10}") int topK,
+            @Value("${ask.degrade.enabled:true}") boolean degradeEnabled
     ) {
         this.classifier = classifier;
         this.generator = generator;
         this.docLoader = docLoader;
         this.postService = postService;
+        this.semanticSearch = semanticSearch;
         this.embeddingClient = embeddingClient;
         this.embeddingRepository = embeddingRepository;
+        this.rateLimiter = rateLimiter;
+        this.policies = policies;
+        this.cache = cache;
+        this.budget = budget;
+        this.meters = meters;
         this.minTop1Score = minTop1Score;
         this.topK = topK;
+        this.degradeEnabled = degradeEnabled;
+        // 与语义搜索的检索链同一个指标，stage 区分：问答经验类的纯向量检索（含 query 向量化）
+        this.vectorTimer = Timer.builder(TimedStrategy.METRIC).tags("stage", "ask-vector", "outcome", "ok").register(meters);
     }
 
     public AskResponse ask(String query, Long selfId) {
@@ -110,59 +156,134 @@ public class AskService {
 
     /** 流式问答的进度回调，在调用 {@link #askStreaming} 的线程上触发 */
     public interface AskListener {
-        /** 意图分类完成，检索和生成之前 */
+        /** 意图分类完成（或缓存命中、或降级时本地词表判为风险类），检索和生成之前 */
         void onIntent(QueryIntent intent);
 
         /** 生成的一段文本增量，已过输出过滤 */
         void onDelta(String text);
     }
 
+    private static final AskListener SILENT = new AskListener() {
+        @Override
+        public void onIntent(QueryIntent intent) {}
+
+        @Override
+        public void onDelta(String text) {}
+    };
+
     public AskResponse askStreaming(String query, Long selfId, AskListener listener) {
-        return run(query, selfId, Objects.requireNonNull(listener)).response();
+        return run(query, selfId, Objects.requireNonNull(listener), true).response();
     }
 
     /**
      * 与 {@link #ask} 同一条路径，额外带出中间结果给评测用：生成层评测的 judge 要看到送进模型的帖子，
      * 意图与拒答指标要看到分类结果和 top-1。线上只用 {@link #ask}。
      *
-     * @param top1 向量 top-1 余弦；没走检索（RISK / RESONANCE）时为 NaN
+     * @param intent 降级且意图未知时为 null
+     * @param top1 向量 top-1 余弦；没走检索（RISK / RESONANCE / 缓存命中）时为 NaN
      * @param docs 送进生成层的帖子；没调生成时为空
      */
     public record Trace(QueryIntent intent, double top1, List<SourceDoc> docs, AskResponse response) {}
 
     public Trace trace(String query, Long selfId) {
-        return run(query, selfId, null);
+        return run(query, selfId, SILENT, false);
     }
 
-    /** @param listener 为 null 时走非流式生成 */
-    private Trace run(String query, Long selfId, AskListener listener) {
+    /**
+     * 流式问答的线程池满了：不调任何外部服务，在请求线程上直接给降级结果（风险词表照常生效）。
+     * 不扣限流令牌——这次请求本来就没被服务
+     */
+    public AskResponse overloaded(String query, Long selfId, AskListener listener) {
+        String q = validate(query);
+        return record(degradeUnknownIntent(q, selfId, listener, Degradation.OVERLOADED, null, false), "live").response();
+    }
+
+    /** @param streaming false 时走非流式生成 */
+    private Trace run(String query, Long selfId, AskListener listener, boolean streaming) {
+        Timer.Sample sample = Timer.start(meters);
+        String q = validate(query);
+        Trace trace;
+        String source = "live";
+
+        RateLimiter.Decision quota = rateLimiter.tryAcquire(policies.ask(), selfId);
+        Optional<AskCache.Entry> cached = quota.allowed() ? cache.get(q) : Optional.empty();
+        if (!quota.allowed()) {
+            // 被限流的用户不再触发任何外部调用，连 embedding 都不调：检索结果交给前端的关键词搜索
+            trace = degradeUnknownIntent(q, selfId, listener, Degradation.RATE_LIMITED, quota.retryAfterSeconds(), false);
+        } else if (cached.isPresent()) {
+            source = "cache";
+            listener.onIntent(cached.get().intent());
+            trace = fromCache(cached.get(), selfId);
+        } else if (budget.exhausted()) {
+            trace = degradeUnknownIntent(q, selfId, listener, Degradation.BUDGET_EXHAUSTED, null, true);
+        } else {
+            trace = classifyAndRoute(q, selfId, listener, streaming);
+            store(q, trace);
+        }
+
+        record(trace, source);
+        sample.stop(Timer.builder("ask.latency").tags("mode", trace.response().getMode().name(), "source", source)
+                .register(meters));
+        return trace;
+    }
+
+    private static String validate(String query) {
         String q = query == null ? "" : query.strip();
         if (q.isEmpty() || q.length() > PostService.SEMANTIC_QUERY_MAX_LENGTH) {
             throw new WeiboException(CommonErrorCode.SEARCH_QUERY_INVALID);
         }
+        return q;
+    }
 
+    private Trace classifyAndRoute(String q, Long selfId, AskListener listener, boolean streaming) {
         QueryIntent intent;
         try {
             intent = classifier.classify(q);
         } catch (ClaudeCallException e) {
             log.warn("意图分类失败 kind={}，不猜类别：{}", e.kind(), e.getMessage());
-            throw new WeiboException(CommonErrorCode.ASK_UNAVAILABLE);
+            if (!degradeEnabled) {
+                throw new WeiboException(CommonErrorCode.ASK_UNAVAILABLE);
+            }
+            return degradeUnknownIntent(q, selfId, listener, degradation(e), null, true);
         }
-        if (listener != null) {
-            listener.onIntent(intent);
-        }
+        listener.onIntent(intent);
 
         return switch (intent) {
-            case RISK -> new Trace(intent, Double.NaN, List.of(),
-                    AskResponse.builder().mode(Mode.RISK).message(RISK_MESSAGE).helplines(HELPLINES).build());
-            case RESONANCE -> new Trace(intent, Double.NaN, List.of(), AskResponse.builder().mode(Mode.RESONANCE)
-                    .posts(postService.getSemanticSearchResults(q, topK, selfId)).build());
-            case EXPERIENCE -> answer(q, selfId, listener);
+            case RISK -> risk();
+            case RESONANCE -> resonance(q, selfId);
+            case EXPERIENCE -> answer(q, selfId, listener, streaming);
         };
     }
 
-    private Trace answer(String q, Long selfId, AskListener listener) {
-        List<ScoredPost> hits = retrieve(q);
+    private static Trace risk() {
+        return new Trace(QueryIntent.RISK, Double.NaN, List.of(),
+                AskResponse.builder().mode(Mode.RISK).message(RISK_MESSAGE).helplines(HELPLINES).build());
+    }
+
+    private Trace resonance(String q, Long selfId) {
+        List<ScoredPostResponse> posts;
+        try {
+            posts = semanticSearch.search(q, topK, selfId);
+        } catch (WeiboException e) {
+            if (!degradeEnabled || e.getCode() != CommonErrorCode.SEMANTIC_SEARCH_UNAVAILABLE.getCode()) {
+                throw e;
+            }
+            return degraded(QueryIntent.RESONANCE, Double.NaN, List.of(), Degradation.SEARCH_UNAVAILABLE, List.of(), null);
+        }
+        return new Trace(QueryIntent.RESONANCE, Double.NaN, List.of(),
+                AskResponse.builder().mode(Mode.RESONANCE).posts(posts).build());
+    }
+
+    private Trace answer(String q, Long selfId, AskListener listener, boolean streaming) {
+        List<ScoredPost> hits;
+        try {
+            hits = retrieve(q);
+        } catch (WeiboException e) {
+            if (!degradeEnabled) {
+                throw e;
+            }
+            return degraded(QueryIntent.EXPERIENCE, Double.NaN, List.of(), Degradation.SEARCH_UNAVAILABLE, List.of(), null);
+        }
         double top1 = hits.isEmpty() ? Double.NEGATIVE_INFINITY : hits.get(0).score();
         if (top1 < minTop1Score) {
             log.info("拒答 reason=LOW_SCORE top1={} 阈值={}", top1, minTop1Score);
@@ -176,14 +297,19 @@ public class AskService {
 
         AnswerGenerator.GeneratedAnswer generated;
         try {
-            generated = listener == null ? generator.generate(q, docs) : generateStreaming(q, docs, listener);
+            generated = streaming ? generateStreaming(q, docs, listener) : generator.generate(q, docs);
         } catch (LeakAbort e) {
             log.warn("输出过滤：流式回答含 system prompt 片段，已中止生成 posts={} 已生成={}",
                     docs.stream().map(SourceDoc::postId).toList(), e.streamed);
             return new Trace(QueryIntent.EXPERIENCE, top1, docs, noAnswer(Refusal.FILTERED));
         } catch (ClaudeCallException e) {
             log.warn("生成失败 kind={}：{}", e.kind(), e.getMessage());
-            throw new WeiboException(CommonErrorCode.ASK_UNAVAILABLE);
+            if (!degradeEnabled) {
+                throw new WeiboException(CommonErrorCode.ASK_UNAVAILABLE);
+            }
+            // 检索已经做完了，把送进模型的那些帖子直接给用户
+            return degraded(QueryIntent.EXPERIENCE, top1, docs, degradation(e),
+                    postService.toScoredResponses(hits, selfId), null);
         }
         CitedAnswer answer = generated.answer();
         if (PromptLeakGuard.leaks(answer.text())) {
@@ -197,10 +323,88 @@ public class AskService {
             log.info("拒答 reason=MODEL top1={} 回答={}", top1, answer.text());
             return new Trace(QueryIntent.EXPERIENCE, top1, docs, noAnswer(Refusal.MODEL));
         }
+        return new Trace(QueryIntent.EXPERIENCE, top1, docs, answered(answer, selfId));
+    }
+
+    private AskResponse answered(CitedAnswer answer, Long selfId) {
         List<PostResponse> sourcePosts = postService.getPublicPosts(
                 answer.sources().stream().map(CitedAnswer.Source::postId).toList(), selfId);
-        return new Trace(QueryIntent.EXPERIENCE, top1, docs,
-                AskResponse.builder().mode(Mode.ANSWER).answer(answer).sourcePosts(sourcePosts).build());
+        return AskResponse.builder().mode(Mode.ANSWER).answer(answer).sourcePosts(sourcePosts).build();
+    }
+
+    /**
+     * 意图未知时的降级：先过本地风险词表，命中按风险类处理；否则给检索结果。
+     * @param withPosts false 时不调 embedding（被限流 / 线程池满），posts 为空，前端用关键词结果
+     */
+    private Trace degradeUnknownIntent(String q, Long selfId, AskListener listener, Degradation reason,
+                                       Long retryAfterSeconds, boolean withPosts) {
+        if (RiskKeywordGuard.flags(q)) {
+            log.info("降级 reason={}，本地风险词表命中，按风险类处理", reason);
+            Counter.builder("ask.risk.keyword.hits").register(meters).increment();
+            listener.onIntent(QueryIntent.RISK);
+            return risk();
+        }
+        List<ScoredPostResponse> posts = List.of();
+        if (withPosts) {
+            try {
+                posts = semanticSearch.search(q, topK, selfId);
+            } catch (WeiboException e) {
+                log.warn("降级时语义搜索也不可用，只返回提示：{}", e.getMessage());
+            }
+        }
+        log.info("降级 reason={} posts={}", reason, posts.size());
+        return degraded(null, Double.NaN, List.of(), reason, posts, retryAfterSeconds);
+    }
+
+    private static Trace degraded(QueryIntent intent, double top1, List<SourceDoc> docs, Degradation reason,
+                                  List<ScoredPostResponse> posts, Long retryAfterSeconds) {
+        return new Trace(intent, top1, docs, AskResponse.builder()
+                .mode(Mode.DEGRADED).degradation(reason).message(DEGRADED_MESSAGE)
+                .posts(posts).retryAfterSeconds(retryAfterSeconds).build());
+    }
+
+    private static Degradation degradation(ClaudeCallException e) {
+        return e.kind() == ClaudeCallException.Kind.TIMEOUT ? Degradation.AI_TIMEOUT : Degradation.AI_UNAVAILABLE;
+    }
+
+    /** 降级、FILTERED、NO_DOCS 不进缓存，理由见 {@link AskCache} */
+    private void store(String q, Trace trace) {
+        AskResponse r = trace.response();
+        boolean cacheable = switch (r.getMode()) {
+            case ANSWER, RESONANCE, RISK -> true;
+            case NO_ANSWER -> r.getRefusal() == Refusal.LOW_SCORE || r.getRefusal() == Refusal.MODEL;
+            case DEGRADED -> false;
+        };
+        if (!cacheable) {
+            return;
+        }
+        List<ScoredPost> hits = r.getMode() == Mode.RESONANCE
+                ? r.getPosts().stream().map(p -> new ScoredPost(p.getPost().getId(), p.getScore())).toList()
+                : null;
+        cache.put(q, new AskCache.Entry(trace.intent(), r.getMode(), r.getRefusal(), r.getAnswer(), hits));
+    }
+
+    private Trace fromCache(AskCache.Entry e, Long selfId) {
+        AskResponse response = switch (e.mode()) {
+            case RISK -> risk().response();
+            case RESONANCE -> AskResponse.builder().mode(Mode.RESONANCE)
+                    .posts(postService.toScoredResponses(e.hits(), selfId)).build();
+            case ANSWER -> answered(e.answer(), selfId);
+            case NO_ANSWER -> noAnswer(e.refusal());
+            case DEGRADED -> throw new IllegalStateException("降级结果不该进缓存");
+        };
+        response.setCached(true);
+        return new Trace(e.intent(), Double.NaN, List.of(), response);
+    }
+
+    /** 指标 {@code ask.outcomes}：拒答率 = NO_ANSWER / (ANSWER + NO_ANSWER)，detail 是拒答层或降级原因 */
+    private Trace record(Trace trace, String source) {
+        AskResponse r = trace.response();
+        String detail = r.getRefusal() != null ? r.getRefusal().name()
+                : r.getDegradation() != null ? r.getDegradation().name() : "-";
+        Counter.builder("ask.outcomes").tags("mode", r.getMode().name(), "detail", detail, "source", source)
+                .register(meters).increment();
+        return trace;
     }
 
     /** 每段文本推出去之前先对累计文本做输出过滤，命中即抛 {@link LeakAbort} 中止流 */
@@ -226,6 +430,7 @@ public class AskService {
 
     /** 与 Day 14 阈值校准同一条检索：voyage-4 向量、PUBLIC 帖子、按余弦从高到低 */
     private List<ScoredPost> retrieve(String q) {
+        long start = System.nanoTime();
         float[] vector;
         try {
             vector = embeddingClient.embedQuery(q);
@@ -233,9 +438,11 @@ public class AskService {
             log.warn("问答查询向量化失败：{}", e.getMessage());
             throw new WeiboException(CommonErrorCode.SEMANTIC_SEARCH_UNAVAILABLE);
         }
-        return embeddingRepository.searchNearest(vector, embeddingClient.modelId(), topK).stream()
+        List<ScoredPost> hits = embeddingRepository.searchNearest(vector, embeddingClient.modelId(), topK).stream()
                 .map(h -> new ScoredPost(h.postId(), h.score()))
                 .toList();
+        vectorTimer.record(System.nanoTime() - start, TimeUnit.NANOSECONDS);
+        return hits;
     }
 
     private static AskResponse noAnswer(Refusal refusal) {

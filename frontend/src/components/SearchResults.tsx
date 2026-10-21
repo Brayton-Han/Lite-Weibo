@@ -28,10 +28,13 @@ export default function SearchResults() {
   // --- AI 问答：与关键词搜索并行，先拿到意图再决定展示什么 ---
   const ask = useAskStream(query);
 
-  // 风险类不展示任何帖子；意图未知（分类中、分类失败）时也不展示，免得风险类 query 先看到一屏帖子
-  const showPosts = ask.intent !== null && ask.intent !== 'RISK';
-  // 共鸣类不生成，直接展示语义搜索结果
-  const resonancePosts = ask.result?.mode === 'RESONANCE' ? (ask.result.posts ?? []).map(p => p.post) : [];
+  // 风险类不展示任何帖子；意图未知（分类中）时也不展示，免得风险类 query 先看到一屏帖子。
+  // 降级（DEGRADED）时意图可能未知，但后端已经用本地风险词表筛过——命中的会以 RISK 返回，所以降级结果可以放心展示帖子
+  const degraded = ask.result?.mode === 'DEGRADED';
+  const showPosts = (ask.intent !== null && ask.intent !== 'RISK') || degraded;
+  // 共鸣类不生成，直接展示语义搜索结果；降级时同样把能拿到的语义搜索结果放在前面
+  const resonancePosts = ask.result?.mode === 'RESONANCE' || degraded
+    ? (ask.result?.posts ?? []).map(p => p.post) : [];
   const resonanceIds = new Set(resonancePosts.map(p => p.id));
   const keywordPosts = posts.filter(p => !resonanceIds.has(p.id));
   const askSettled = ask.phase === 'done' || ask.phase === 'error';

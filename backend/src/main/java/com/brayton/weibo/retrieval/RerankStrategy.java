@@ -28,6 +28,7 @@ import java.util.function.Function;
  * <h3>降级</h3>
  * {@code fallbackOnError = true} 时 reranker 抛 {@link RerankException} 就返回 base 的前 k 条并打 warn——
  * 重排是锦上添花，外部 API 挂了不能把搜索整个打挂。评测传 false：静默降级会让指标混进 base 的结果，必须失败得明明白白。
+ * 每次降级还会调一次 {@code onFallback}，线上用它给降级次数计数（Day 17）。
  *
  * score 字段是 reranker 的分数（降级时是 base 的分数），与其他策略不可比，见 {@link ScoredPost}。
  */
@@ -39,13 +40,21 @@ public class RerankStrategy implements RetrievalStrategy {
     private final Function<Collection<Long>, Map<Long, String>> texts;
     private final int n;
     private final boolean fallbackOnError;
+    private final Runnable onFallback;
+
+    public RerankStrategy(RetrievalStrategy base, Reranker reranker,
+                          Function<Collection<Long>, Map<Long, String>> texts, int n, boolean fallbackOnError) {
+        this(base, reranker, texts, n, fallbackOnError, () -> {});
+    }
 
     /**
      * @param texts 按 id 批量取正文；返回的 map 里缺的 id 视为已删除
      * @param n     候选深度（top-N），Day 12 默认 30
+     * @param onFallback 降级时调用，只在 {@code fallbackOnError} 为 true 时有意义
      */
     public RerankStrategy(RetrievalStrategy base, Reranker reranker,
-                          Function<Collection<Long>, Map<Long, String>> texts, int n, boolean fallbackOnError) {
+                          Function<Collection<Long>, Map<Long, String>> texts, int n, boolean fallbackOnError,
+                          Runnable onFallback) {
         if (n <= 0) {
             throw new IllegalArgumentException("n must be positive, got " + n);
         }
@@ -54,6 +63,7 @@ public class RerankStrategy implements RetrievalStrategy {
         this.texts = texts;
         this.n = n;
         this.fallbackOnError = fallbackOnError;
+        this.onFallback = onFallback;
     }
 
     @Override
@@ -96,6 +106,7 @@ public class RerankStrategy implements RetrievalStrategy {
                 throw e;
             }
             log.warn("rerank 失败，降级为第一阶段排序：{}", e.getMessage());
+            onFallback.run();
             return kept.stream().limit(k).toList();
         }
         if (reranked.size() >= k || blank.isEmpty()) {

@@ -1,5 +1,6 @@
 package com.brayton.weibo.config.security;
 
+import com.brayton.weibo.config.TraceIdFilter;
 import com.brayton.weibo.service.JWTService;
 import com.brayton.weibo.service.UserService;
 import jakarta.servlet.FilterChain;
@@ -7,6 +8,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import org.slf4j.MDC;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -47,6 +49,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                             new UsernamePasswordAuthenticationToken(userPrincipal, null, userPrincipal.getAuthorities());
 
                     SecurityContextHolder.getContext().setAuthentication(authentication);
+                    // 由 TraceIdFilter 在请求结束时清掉
+                    MDC.put(TraceIdFilter.USER_ID, String.valueOf(userId));
                 }
             } catch (JWTVerificationException e) {
                 // Token 验证失败（如过期、签名无效），清除上下文并返回 401

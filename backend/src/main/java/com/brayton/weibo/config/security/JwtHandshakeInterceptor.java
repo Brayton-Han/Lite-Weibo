@@ -1,5 +1,6 @@
 package com.brayton.weibo.config.security;
 
+import lombok.extern.slf4j.Slf4j;
 import com.brayton.weibo.service.JWTService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.server.ServerHttpRequest;
@@ -12,6 +13,7 @@ import org.springframework.web.socket.server.HandshakeInterceptor;
 import java.util.List;
 import java.util.Map;
 
+@Slf4j
 @Component
 @RequiredArgsConstructor
 public class JwtHandshakeInterceptor implements HandshakeInterceptor {
@@ -56,7 +58,7 @@ public class JwtHandshakeInterceptor implements HandshakeInterceptor {
                     return true;
                 }
             } catch (Exception e) {
-                System.out.println("WebSocket Auth Failed: " + e.getMessage());
+                log.info("WebSocket 鉴权失败：{}", e.getMessage());
             }
         }
 

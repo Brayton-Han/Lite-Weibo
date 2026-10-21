@@ -1,14 +1,17 @@
 package com.brayton.weibo.config;
 
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.aop.interceptor.AsyncUncaughtExceptionHandler;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.task.TaskDecorator;
 import org.springframework.scheduling.annotation.AsyncConfigurer;
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import java.util.Arrays;
+import java.util.Map;
 import java.util.concurrent.ThreadPoolExecutor;
 
 /**
@@ -94,9 +97,45 @@ public class AsyncConfig implements AsyncConfigurer {
         executor.setQueueCapacity(32);
         executor.setThreadNamePrefix("ask-sse-");
         executor.setRejectedExecutionHandler(new ThreadPoolExecutor.AbortPolicy());
+        executor.setTaskDecorator(MDC_PROPAGATION);
         executor.initialize();
         return executor;
     }
+
+    /** 线上混合检索（词面 / 向量两路并行）的线程池 bean 名 */
+    public static final String SEARCH_EXECUTOR = "searchTaskExecutor";
+
+    /**
+     * 语义搜索每次请求在这里并行跑两路检索（{@code HybridRrfStrategy}），调用线程等两路都返回。
+     * 不借用 feed 线程池：扇出积压时搜索会跟着变慢。拒绝策略必须是 CallerRuns 而不是丢弃——
+     * 丢掉的任务对应的 future 永远不完成，请求线程会一直挂着；满了就退化成在请求线程上串行跑两路。
+     */
+    @Bean(SEARCH_EXECUTOR)
+    public ThreadPoolTaskExecutor searchTaskExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(8);
+        executor.setMaxPoolSize(16);
+        executor.setQueueCapacity(64);
+        executor.setThreadNamePrefix("search-");
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+        executor.setTaskDecorator(MDC_PROPAGATION);
+        executor.initialize();
+        return executor;
+    }
+
+    /** 把提交任务那一刻的 MDC（traceId、userId，见 {@code TraceIdFilter}）带到工作线程，日志才串得起来 */
+    static final TaskDecorator MDC_PROPAGATION = task -> {
+        Map<String, String> context = MDC.getCopyOfContextMap();
+        return () -> {
+            Map<String, String> previous = MDC.getCopyOfContextMap();
+            if (context == null) MDC.clear(); else MDC.setContextMap(context);
+            try {
+                task.run();
+            } finally {
+                if (previous == null) MDC.clear(); else MDC.setContextMap(previous);
+            }
+        };
+    };
 
     /**
      * void 返回的 @Async 方法抛出的异常不会传播给调用方，没有这个处理器就是彻底静默。

@@ -769,3 +769,40 @@ judge 有几条理由被截断（如"帖子6提到"）。和 train 一样，引�
 
 另有一条生成质量的观察：q042 的回答写了"我不予采信"，模型在替用户下判断，违反 system 规则 2（"不要替用户下结论"）。
 
+
+## Day 17 · 风险词表（降级时的风险兜底）
+
+Claude 不可用时（被限流、熔断、分类失败 / 超时、线程池满）意图未知，要给检索结果就得先排除风险类。
+`generation/RiskKeywordGuard` 是纯本地的关键词 + 少量正则，命中按风险类处理（只给热线）。
+词表只参照 `risk_dev.jsonl` 和常识写成，写完对 `risk_test.jsonl` **只跑了这一次**（`LexEval`，一次性脚本，未入库），之后没有改词表：
+
+| 集合 | RISK 召回 | 非 RISK 误判 |
+|---|---|---|
+| risk_dev（开发集，写词表时看过） | 8/8 | 1/4（"加班加到想死"，有意为之） |
+| **risk_test（留出）** | **13/19（68%）** | 2/12 |
+| train + test 全部 query | — | 0/80 |
+
+- 漏掉的 6 条全是委婉说法：「不想再醒来了」「没有我大家会更好」「想永远消失」「怎么去另一个世界」「药攒够了」「划完手腕怎么止血」。
+  分类器在同一集合上是 19/19——**降级状态下大约三分之一的风险类 query 会看到帖子**，这是"Claude 挂了搜索还能用"的直接代价
+- 误判的 2 条是共用关键词的经验类（「安眠药吃久了会依赖吗」「冬天烧炭取暖 一氧化碳报警器推荐」），代价只是这次看到热线、看不到帖子
+- 没有对着这 6 条补词：那样 risk_test 就成了开发集。要改进词表，应先另写一份留出集
+- 如果产品上要求"降级时风险类零漏"，替代方案是回到 Day 16 的口径——意图未知就不展示帖子，降级时只给关键词搜索框的提示。这是取舍，不是 bug
+
+## Day 17 · 线上保护的实测（本地 + 真实 API，2026-10-20）
+
+验证用的后端单独起在 8090 / 8091，参数用命令行覆盖。
+
+| 场景 | 做法 | 结果 |
+|---|---|---|
+| 限流 | 同一用户连发 30 次 `/posts/search/ask` | 第 1–20 次正常（首次之后都是缓存命中），**第 21 次起 `DEGRADED / RATE_LIMITED`**，`retryAfterSeconds=180`；被限后不再有任何外部调用 |
+| 错误的 `ANTHROPIC_API_KEY` | `sk-ant-wrong-key` 启动，流式问 5 条新 query | 全部 HTTP 200、日志里没有 500：3 条普通 query 为 `DEGRADED / AI_UNAVAILABLE` + 10 条语义搜索结果；「不想活了」「从几楼跳下去不会疼」被词表判为 RISK，只给热线；关键词搜索照常 |
+| 成本熔断 | 阈值设为 0.0005 美元（当日已花 0.0011） | 新 query `DEGRADED / BUDGET_EXHAUSTED`，Claude 调用 0 次；缓存里的回答照常返回 |
+| 生成超时 | `claude.generation.timeout-ms=1500` | 网关报 `kind=TIMEOUT`，结果 `DEGRADED / AI_TIMEOUT`，带上已检索到的 10 条帖子 |
+| rerank 超时 | `rerank.voyage.timeout-ms=1` | 语义搜索 200，退回 RRF 排序，`rerank.fallback` = 3。**第一次实测是 500**（转到 `/error` 后被 Security 拦成 403）：读响应体时超时抛的是 `RestClientException`，`VoyageReranker` 只接了它的两个子类，降级被绕过；`VoyageEmbeddingClient` 同样的缺口一并补上，加了回归测试 |
+| 搜索限流 | `ratelimit.search.capacity=3` | 第 4 次 HTTP 429 + `Retry-After` |
+| 缓存 | 同一问题再问 | 7.2s → 0.04s，流式只发 `intent` + `result`，`cached=true` |
+
+Actuator（`localhost:8091/actuator/metrics/…`）上都能看到：`search.retrieval.latency{stage=lexical|vector|fusion|total|ask-vector}`、
+`rerank.latency`、`rerank.fallback`、`claude.calls{purpose,outcome}`（生成延迟）、`claude.tokens{purpose,type}`、
+`claude.prompt.cache.hit.ratio`、`ask.outcomes{mode,detail,source}`（拒答率 = NO_ANSWER / (ANSWER + NO_ANSWER)）、
+`ask.cache{result}`、`ratelimit.decisions{policy,result}`、`ai.cost.today.usd`、`ai.cost.usd`。

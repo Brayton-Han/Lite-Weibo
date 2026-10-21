@@ -19,6 +19,8 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 class ClaudeGatewayTest {
@@ -44,6 +46,48 @@ class ClaudeGatewayTest {
                 ClaudeCallException.Kind.UPSTREAM, true);
         assertKind(BadRequestException.builder().headers(HEADERS).body(BODY).build(), ClaudeCallException.Kind.BAD_REQUEST, false);
         assertKind(new AnthropicIoException("connection reset"), ClaudeCallException.Kind.NETWORK, true);
+        // OkHttp 的 callTimeout / 读超时
+        assertKind(new AnthropicIoException("Stream failed", new java.io.InterruptedIOException("timeout")),
+                ClaudeCallException.Kind.TIMEOUT, true);
+        assertKind(new AnthropicIoException("Request failed", new java.net.SocketTimeoutException("Read timed out")),
+                ClaudeCallException.Kind.TIMEOUT, true);
+    }
+
+    @Test
+    void reportsUsageToListenersAndMetrics() throws Exception {
+        java.util.List<ClaudeGateway.CallUsage> seen = new java.util.ArrayList<>();
+        io.micrometer.core.instrument.simple.SimpleMeterRegistry meters = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+        ClaudeGateway observed = new ClaudeGateway(client, meters, java.util.List.of(seen::add, u -> {
+            throw new IllegalStateException("记账失败不能让调用失败");
+        }));
+        when(client.messages().create(any(MessageCreateParams.class))).thenReturn(message());
+
+        observed.create("answer", PARAMS);
+
+        assertEquals(java.util.List.of(new ClaudeGateway.CallUsage("answer", "claude-haiku-5-5", 340, 15, 1000, 0)), seen);
+        assertEquals(15, meters.counter("claude.tokens", "purpose", "answer", "type", "output").count());
+        assertEquals(1, meters.timer("claude.calls", "purpose", "answer", "outcome", "ok").count());
+        assertEquals(0.0, meters.get("claude.prompt.cache.hit.ratio").gauge().value());
+    }
+
+    @Test
+    void perCallTimeoutIsPassedAsRequestOptions() throws Exception {
+        when(client.messages().create(any(MessageCreateParams.class), any(com.anthropic.core.RequestOptions.class)))
+                .thenReturn(message());
+
+        gateway.create("intent", PARAMS, java.time.Duration.ofSeconds(8));
+
+        verify(client.messages()).create(eq(PARAMS), argThat((com.anthropic.core.RequestOptions o) ->
+                o.getTimeout() != null && o.getTimeout().request().equals(java.time.Duration.ofSeconds(8))));
+    }
+
+    private static Message message() throws Exception {
+        return ObjectMappers.jsonMapper().readValue("""
+                {"id":"msg_1","type":"message","role":"assistant","model":"claude-haiku-5-5",
+                 "content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","stop_sequence":null,
+                 "usage":{"input_tokens":340,"output_tokens":15,
+                          "cache_creation_input_tokens":1000,"cache_read_input_tokens":0}}
+                """, Message.class);
     }
 
     @Test

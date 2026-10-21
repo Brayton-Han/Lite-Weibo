@@ -1,5 +1,6 @@
 package com.brayton.weibo.service;
 
+import lombok.extern.slf4j.Slf4j;
 import com.brayton.weibo.config.RabbitConfig;
 import com.brayton.weibo.config.security.CustomUserDetails;
 import com.brayton.weibo.dto.NotificationResponse;
@@ -30,6 +31,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import java.util.ArrayList;
 import java.util.List;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class NotificationService {
@@ -42,7 +44,7 @@ public class NotificationService {
 
     @RabbitListener(queues = RabbitConfig.FOLLOW_QUEUE)
     public void onMessage(FollowEvent message) {
-        System.out.println("收到通知：" + message.getType());
+        log.debug("收到通知 type={}", message.getType());
 
         Notification n = Notification.follow(message);
         notificationRepository.save(n);
@@ -51,7 +53,7 @@ public class NotificationService {
 
     @RabbitListener(queues = RabbitConfig.LIKE_QUEUE)
     public void onMessage(LikeEvent message) {
-        System.out.println("收到通知：" + message.getType());
+        log.debug("收到通知 type={}", message.getType());
 
         Notification n = Notification.like(message);
         notificationRepository.save(n);
@@ -60,7 +62,7 @@ public class NotificationService {
 
     @RabbitListener(queues = RabbitConfig.COMMENT_QUEUE)
     public void onMessage(CommentEvent message) {
-        System.out.println("收到通知：" + message.getType());
+        log.debug("收到通知 type={}", message.getType());
 
         Notification n = Notification.comment(message);
         notificationRepository.save(n);

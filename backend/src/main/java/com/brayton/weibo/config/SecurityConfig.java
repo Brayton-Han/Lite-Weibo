@@ -41,6 +41,8 @@ public class SecurityConfig {
                         // 允许所有人访问登录和注册端点
                         .requestMatchers("/login", "/register", "ping").permitAll()
                         .requestMatchers("/ws/**").permitAll()
+                        // Actuator 只在管理端口（management.server.port）上提供，主端口上不存在这些路径；管理端口不对外映射
+                        .requestMatchers("/actuator/**").permitAll()
                         // SseEmitter 结束时的 async dispatch 不经过 JWT 过滤器；原请求已经鉴权过，这里放行，否则响应已提交后再报 Access Denied
                         .dispatcherTypeMatchers(DispatcherType.ASYNC).permitAll()
                         // 其他所有请求都需要认证

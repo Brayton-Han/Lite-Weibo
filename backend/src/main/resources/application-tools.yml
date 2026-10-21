@@ -15,3 +15,23 @@ spring:
         auto-startup: false
       direct:
         auto-startup: false
+
+# RAG Day 17：评测要测的是模型本身，线上那套保护全部关掉——
+# 降级会让指标静默混进检索结果；缓存会让重跑拿到旧回答；限流和熔断会把评测打断，
+# 而且评测的花费不该算进线上的当日预算（两边共用一个 Redis）
+claude:
+  max-retries: 2
+# 与线上 backend 同时跑时不抢 8081
+management:
+  server:
+    port: -1
+ask:
+  degrade:
+    enabled: false
+  cache:
+    enabled: false
+ratelimit:
+  enabled: false
+ai:
+  budget:
+    enabled: false

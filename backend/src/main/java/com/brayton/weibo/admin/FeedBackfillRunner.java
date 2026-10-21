@@ -1,5 +1,6 @@
 package com.brayton.weibo.admin;
 
+import lombok.extern.slf4j.Slf4j;
 import com.brayton.weibo.entity.Post;
 import com.brayton.weibo.repository.PostRepository;
 import com.brayton.weibo.service.FeedWriteService;
@@ -25,6 +26,7 @@ import org.springframework.transaction.annotation.Transactional;
  * ZSET add 以 (key, member) 为唯一键，重复执行只会覆盖同一 member 的 score，
  * 因此本工具可安全重跑，不会产生重复条目。
  */
+@Slf4j
 @Component
 @RequiredArgsConstructor
 public class FeedBackfillRunner implements CommandLineRunner {
@@ -41,7 +43,7 @@ public class FeedBackfillRunner implements CommandLineRunner {
             return;
         }
 
-        System.out.println("\n🔄 开始回灌 feed 缓存...\n");
+        log.info("开始回灌 feed 缓存");
         long start = System.currentTimeMillis();
 
         int postCount = 0;
@@ -63,10 +65,7 @@ public class FeedBackfillRunner implements CommandLineRunner {
         } while (posts.hasNext());
 
         long elapsed = System.currentTimeMillis() - start;
-        System.out.println("✅ 回灌完成");
-        System.out.println("   帖子数:   " + postCount);
-        System.out.println("   feed 条目: " + entryCount);
-        System.out.println("   耗时:     " + elapsed + " ms\n");
+        log.info("回灌完成 帖子数={} feed条目={} 耗时={}ms", postCount, entryCount, elapsed);
 
         System.exit(0);
     }

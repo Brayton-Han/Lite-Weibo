@@ -2,19 +2,17 @@ package com.brayton.weibo.controller;
 
 import com.brayton.weibo.config.security.CustomUserDetails;
 import com.brayton.weibo.dto.*;
-import com.brayton.weibo.enums.PostVisibility;
+import com.brayton.weibo.ratelimit.RateLimitPolicies;
+import com.brayton.weibo.ratelimit.RateLimiter;
 import com.brayton.weibo.service.AskService;
-import com.brayton.weibo.service.FileService;
 import com.brayton.weibo.service.PostService;
 import com.brayton.weibo.service.RetrievalDetailService;
+import com.brayton.weibo.service.SemanticSearchService;
 import jakarta.validation.Valid;
 import lombok.AllArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.security.core.userdetails.ReactiveUserDetailsPasswordService;
-import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 
@@ -25,6 +23,9 @@ public class PostController {
     private final PostService postService;
     private final AskService askService;
     private final RetrievalDetailService retrievalDetailService;
+    private final SemanticSearchService semanticSearchService;
+    private final RateLimiter rateLimiter;
+    private final RateLimitPolicies rateLimitPolicies;
 
     @GetMapping("/user/{uid}/posts")
     public ResponseEntity<ApiResponse<?>> getPosts(
@@ -117,7 +118,8 @@ public class PostController {
             @RequestParam(defaultValue = "10") int k,
             @AuthenticationPrincipal CustomUserDetails self
     ) {
-        List<ScoredPostResponse> posts = postService.getSemanticSearchResults(q, k, self.getId());
+        rateLimiter.check(rateLimitPolicies.search(), self.getId());
+        List<ScoredPostResponse> posts = semanticSearchService.search(q, k, self.getId());
         return ResponseEntity.ok(ApiResponse.success(posts));
     }
 
@@ -128,10 +130,14 @@ public class PostController {
             @RequestParam(defaultValue = "5") int k,
             @AuthenticationPrincipal CustomUserDetails self
     ) {
+        rateLimiter.check(rateLimitPolicies.search(), self.getId());
         return ResponseEntity.ok(ApiResponse.success(retrievalDetailService.explain(q, k, self.getId())));
     }
 
-    /** 站内问答：按意图分流，经验类带引用作答，共鸣类返回搜索结果，风险类返回求助渠道。见 {@link AskService} */
+    /**
+     * 站内问答：按意图分流，经验类带引用作答，共鸣类返回搜索结果，风险类返回求助渠道。见 {@link AskService}。
+     * 限流在 AskService 里做：被限后降级成 DEGRADED，不是 429
+     */
     @GetMapping("/posts/search/ask")
     public ResponseEntity<ApiResponse<?>> ask(
             @RequestParam String q,

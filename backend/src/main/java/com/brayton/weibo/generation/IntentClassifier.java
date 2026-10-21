@@ -6,8 +6,11 @@ import com.anthropic.models.messages.StructuredMessage;
 import com.anthropic.models.messages.StructuredMessageCreateParams;
 import com.anthropic.models.messages.ThinkingConfigDisabled;
 import com.fasterxml.jackson.annotation.JsonPropertyDescription;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+
+import java.time.Duration;
 
 /**
  * query 意图分类器，挡在生成调用前面：只有 {@link QueryIntent#EXPERIENCE} 才往下走。
@@ -23,6 +26,9 @@ import org.springframework.stereotype.Component;
  * <h3>失败</h3>
  * 调用失败或输出不可用时抛 {@link ClaudeCallException}，不在这里兜底成某个类别——尤其不能静默落到 EXPERIENCE，
  * 那会让风险类 query 进生成层。怎么降级由调用方按 {@link ClaudeCallException#kind()} 决定。
+ *
+ * <h3>超时</h3>
+ * 分类正常 1–2s，单次超时默认 8s（{@code claude.intent.timeout-ms}）。它挡在整条问答前面，挂住就是整页都在等。
  */
 @Component
 public class IntentClassifier {
@@ -51,17 +57,26 @@ public class IntentClassifier {
 
     private final ClaudeGateway gateway;
     private final String model;
+    private final Duration timeout;
 
+    public IntentClassifier(ClaudeGateway gateway, String model) {
+        this(gateway, model, 0);
+    }
+
+    /** @param timeoutMs 0 表示用 client 级超时 */
+    @Autowired
     public IntentClassifier(
             ClaudeGateway gateway,
-            @Value("${claude.intent.model:claude-haiku-5-5}") String model
+            @Value("${claude.intent.model:claude-haiku-5-5}") String model,
+            @Value("${claude.intent.timeout-ms:8000}") long timeoutMs
     ) {
         this.gateway = gateway;
         this.model = model;
+        this.timeout = timeoutMs > 0 ? Duration.ofMillis(timeoutMs) : null;
     }
 
     public QueryIntent classify(String query) {
-        StructuredMessage<IntentResult> response = gateway.create("intent", buildParams(query));
+        StructuredMessage<IntentResult> response = gateway.create("intent", buildParams(query), timeout);
         StopReason stop = response.stopReason().orElse(null);
         if (stop != StopReason.END_TURN) {
             throw new ClaudeCallException(ClaudeCallException.Kind.BAD_RESPONSE, "意图分类未正常结束，stop_reason=" + stop);

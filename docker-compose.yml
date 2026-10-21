@@ -38,7 +38,13 @@ services:
       - rabbitmq
     ports:
       - "8080:8080"
+      # Actuator（/actuator/metrics、/actuator/prometheus），只绑本机回环，不对外
+      - "127.0.0.1:8081:8081"
     environment:
+      # 结构化 JSON 日志（Spring Boot 内置 logstash 格式），MDC 里的 traceId / userId 是独立字段
+      LOGGING_STRUCTURED_FORMAT_CONSOLE: logstash
+      # 当日 Claude 花费阈值（美元），到了就关闭 AI 回答、只保留检索
+      AI_BUDGET_DAILY_USD: ${AI_BUDGET_DAILY_USD:-5.0}
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgresql_weibo:5432/weibo
       SPRING_DATASOURCE_USERNAME: postgres
       SPRING_DATASOURCE_PASSWORD: 123456

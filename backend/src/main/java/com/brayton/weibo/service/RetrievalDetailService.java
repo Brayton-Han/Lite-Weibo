@@ -31,7 +31,7 @@ import java.util.stream.Collectors;
  *
  * <h3>和问答的关系</h3>
  * 问答（{@link AskService}）只用向量路，拒答阈值也是按向量 top-1 余弦校准的；RRF 是 Day 11 在评测里选定的混合检索配置，
- * 还没接进问答（Day 17 接 rerank 时一起上，届时阈值要重新校准）。面板把两者都摆出来，并标出向量 top-1 与阈值，
+ * 没有接进问答的经验类（Day 17 的 rerank(rrf) 只接了语义搜索和共鸣类，经验类要接得先在 train 上重新校准阈值）。面板把两者都摆出来，并标出向量 top-1 与阈值，
  * 正好能解释"为什么这条拒答了"。融合调的就是 {@link HybridRrfStrategy#fuse}，展示的数字与评测同一套算法。
  *
  * <h3>成本</h3>
