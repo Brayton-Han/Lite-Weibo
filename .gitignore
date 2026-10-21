@@ -10,8 +10,11 @@ __pycache__/
 corpus/
 LWC-messages/
 
-# 个人面试准备笔记，只留本地
+# 私人文稿，只留本地：项目分析与面试准备、RAG 学习计划（含面试钩子与简历模板）、面试稿。
+# 公开的系统文档：DESIGN / EVAL / CORPUS_DESIGN / ENTITY_SCHEMA / CONCURRENCY_OPTIMIZATION / 两份吞吐测试指南
 docs/PROJECT_ANALYSIS.*
+docs/RAG_ROADMAP.md
+docs/INTERVIEW.md
 
 # Day 8 评测集构造的中间产物：候选池与标注表含帖子正文（噪声层为 LWC 派生文本，同上受 SA 约束）。
 # 最终的 eval/{train,test}/queries.jsonl、eval/qrels.tsv 只含 query 与 post_id，可以提交。

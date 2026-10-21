@@ -6,7 +6,7 @@
 
 ```bash
 # 进入项目根目录
-cd /Users/brayton/Desktop/Lite-Weibo
+cd Lite-Weibo
 
 # 运行测试脚本
 ./run_comment_throughput_test.sh

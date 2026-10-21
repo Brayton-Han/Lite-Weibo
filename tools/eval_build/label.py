@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""候选池相关性标注（RAG_ROADMAP Day 8 第 5 步）。
+"""候选池相关性标注（RAG Day 8 第 5 步）。
 
     python label.py export              # 每条 query 导出一个盲标任务 → eval/work/label_tasks/
     #   → Claude Code 子代理按 eval/LABELING_GUIDE.md 标注，结果写 eval/work/label_out/{qid}.jsonl

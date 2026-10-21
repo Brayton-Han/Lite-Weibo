@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""人机标注一致性（RAG_ROADMAP Day 8 验收）。
+"""人机标注一致性（RAG Day 8 验收）。
 
     python agreement.py        # 读人工表与 Claude 标注，输出一致率与 Cohen's kappa → eval/AGREEMENT.md
 

@@ -13,7 +13,7 @@ import java.util.stream.Collectors;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 真实调用 Claude 的冒烟测试，验证 citations 的真实形状与 {@link CitedAnswerAssembler} 的假设一致（RAG_ROADMAP Day 14）。
+ * 真实调用 Claude 的冒烟测试，验证 citations 的真实形状与 {@link CitedAnswerAssembler} 的假设一致（RAG Day 14）。
  * 未设置 ANTHROPIC_API_KEY 时自动跳过，不影响 ./mvnw test。用 Haiku，单次约 $0.001。
  *
  * <p>帖子带 emoji 是故意的：API 的字符下标按 code point 计，assembler 换算成 UTF-16 后必须能逐字截回 cited_text。

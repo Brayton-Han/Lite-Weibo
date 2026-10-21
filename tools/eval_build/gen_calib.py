@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""生成层 judge 校准（RAG_ROADMAP Day 15 第三条）。不调用任何 API。
+"""生成层 judge 校准（RAG Day 15 第三条）。不调用任何 API。
 
     python gen_calib.py sample       # 从全量校准表抽样 → eval/work/gen_calib_sample_train.tsv，交给人工标
     python gen_calib.py agreement    # 人工标完后：人工 vs judge 一致率 → eval/GEN_AGREEMENT.md

@@ -18,13 +18,13 @@ Beyond the usual social features, the project focuses on two things:
 | Feed | Latest square, following-based recommendations, friend circle; cursor pagination |
 | Interactions | Likes, comments, comment deletion, liked-posts list |
 | Notifications | Follow / like / comment notifications, unread badge, real-time WebSocket push |
-| Search | Keyword search (Chinese via `pg_trgm`, English via `tsvector`), semantic search, on-site Q&A |
+| Search | Keyword search (Chinese via `pg_trgm`, English via `tsvector`), semantic search (hybrid + rerank), streamed on-site Q&A with clickable citations, a retrieval-details panel |
 
 ---
 
 ## Tech Stack
 
-- **Backend**: Java 21, Spring Boot 3.5, Spring Security + JWT, Spring Data JPA, Flyway, Caffeine, Spring AMQP, STOMP WebSocket
+- **Backend**: Java 21, Spring Boot 3.5, Spring Security + JWT, Spring Data JPA, Flyway, Caffeine, Spring AMQP, STOMP WebSocket, Actuator + Micrometer
 - **Frontend**: Next.js 16, React 19, TypeScript, Tailwind CSS 4, Axios, STOMP.js / SockJS
 - **Storage & middleware**: PostgreSQL 15 + pgvector / pg_trgm, Redis 7 (AOF), RabbitMQ 3, Cloudflare R2 (images)
 - **AI**: Voyage AI (`voyage-4` embeddings, `rerank-3` reranking), Claude (official `anthropic-java` SDK, default model `claude-haiku-5-5`)
@@ -64,27 +64,38 @@ so a rollback never leaves behind ghost notifications or feed entries pointing t
 ### Semantic search and Q&A (RAG)
 
 ```
+Semantic search (/posts/search/semantic, and "related posts" for RESONANCE queries):
+query ─┬─ lexical: pg_trgm word_similarity (zh) / ts_rank_cd (en), top-20 ─┐
+       └─ vector:  voyage-4 → pgvector HNSW, top-20 ──────────────────────┴─ weighted RRF ─▶ Voyage rerank-3 (top 30) ─▶ top-k
+                                                                              (k=10, w=10)    falls back to RRF on failure
+
+Q&A (/posts/search/ask, /posts/search/ask/stream):
 query ──▶ IntentClassifier (Claude)
             ├─ RISK        → crisis message and help resources; no retrieval, no generation
-            ├─ RESONANCE   → semantic search results; no generation
-            └─ EXPERIENCE  → vector retrieval top-k
+            ├─ RESONANCE   → semantic search results (chain above); no generation
+            └─ EXPERIENCE  → vector retrieval top-10
                                ├─ top-1 cosine < 0.40 → "no related discussion on the site" (no model call)
-                               └─ Claude + citations → answer with source-post citations on every sentence
+                               └─ Claude + citations → streamed answer; each citation links to its source post
 ```
 
-- New and edited posts are embedded incrementally and deleted posts are cleaned up; full backfill and consistency checks are available (`EmbeddingBackfillRunner`).
-- Post content is treated as untrusted input, with three layers of defense: document-block isolation, system-prompt rules, and an output-side `PromptLeakGuard`.
-- The retrieval layer also implements `ts_rank`, weighted RRF hybrid, and Voyage rerank strategies (`retrieval/`). They are currently used for evaluation only and are not yet wired into production endpoints.
+- **Embeddings**: new and edited posts are embedded incrementally; deleting a post or changing its visibility removes its vectors, and reposts that quote it are re-embedded. `EmbeddingBackfillRunner` does full backfill and has a read-only consistency check.
+- **Prompt injection**: post content is treated as untrusted input, with three layers of defense: document-block isolation, system-prompt rules, and an output-side `PromptLeakGuard` that runs before each streamed chunk is sent.
+- **Degradation**: when Claude is rate-limited, over the daily budget, failing, or timing out, Q&A returns `DEGRADED` with retrieval results instead of an error. A local keyword list (`RiskKeywordGuard`) still routes risk queries to help resources. If rerank fails, semantic search falls back to RRF ordering.
+- **Protection**: Redis token-bucket rate limits (Q&A 20/hour per user, degraded when exceeded; semantic search 60/min, HTTP 429), a daily Claude cost breaker (`ai.budget.daily-usd`, default $5), per-call timeouts (intent 8s, generation 30s), and a 30-minute Redis cache for Q&A results.
+- **Observability**: Actuator on management port 8081 with retrieval latency by stage, rerank latency and fallbacks, Claude calls, tokens, prompt-cache hit ratio, Q&A outcomes, rate-limit decisions, and daily cost; a `traceId` is put in the MDC and returned as `X-Trace-Id`.
+- **Frontend**: `/search` shows the AI answer card (streamed, with hover previews of the cited text), refusal, risk, and degraded states, plus a collapsible retrieval-details panel showing the lexical top-5, vector top-5, and the fused ranking with each score.
 
-**Eval results** (3,000-post stratified corpus, 80 labeled queries, train/test split; details in [docs/EVAL.md](docs/EVAL.md)):
+Q&A for EXPERIENCE queries still retrieves with pure vector top-10, not the RRF + rerank chain, because the 0.40 refusal threshold was calibrated on vector scores (see [docs/DESIGN.md](docs/DESIGN.md) ADR-9).
 
-| Retrieval strategy (train) | nDCG@10 | MRR | Recall@10 | p50 |
+**Eval results** (3,000-post stratified corpus, 80 labeled queries; parameters tuned on train, **test run once**; details in [docs/EVAL.md](docs/EVAL.md)):
+
+| Retrieval strategy (test, 35 answerable queries) | nDCG@10 | MRR | Recall@10 | p50 |
 |---|---|---|---|---|
-| Original `LIKE` + recency sort | 0.082 | 0.229 | 0.031 | 1.0 ms |
-| Lexical `ts_rank` / trigram | 0.257 | 0.675 | 0.104 | 1.8 ms |
-| Pure vector (production) | 0.766 | 0.941 | 0.386 | 2.9 ms |
-| Weighted RRF (k10 N20 w10) | 0.771 | 0.956 | 0.386 | 2.8 ms |
-| RRF + Voyage rerank | **0.807** | **1.000** | 0.395 | 123 ms |
+| Original `LIKE` + recency sort | 0.082 | 0.186 | 0.048 | 0.5 ms |
+| Lexical (trigram / `ts_rank_cd`) | 0.232 | 0.573 | 0.116 | 1.4 ms |
+| Pure vector | 0.819 | 0.986 | 0.450 | 1.8 ms |
+| Weighted RRF (k10 N20 w10) | 0.819 | 1.000 | 0.448 | 2.4 ms |
+| RRF + Voyage rerank (production semantic search) | **0.848** | **1.000** | **0.479** | 138 ms |
 
 | Generation (test, run once) | Result | Target |
 |---|---|---|
@@ -94,8 +105,13 @@ query ──▶ IntentClassifier (Claude)
 | Risk-intent recall | 100% (19 / 19) | = 100% |
 | Answer helpfulness (1–5) | 3.32 | > 3.5 ❌ |
 
-RRF's gain over pure vector is within the confidence interval and not significant; rerank's gain is significant (nDCG +0.036, 95% CI [+0.005, +0.068]).
-Citation accuracy and hallucination rate are judged by an LLM judge; manual review found it over-reports problems, so treat those two numbers as upper bounds on error.
+How to read these numbers:
+- Almost all of the gain comes from vector retrieval (nDCG +0.587 over lexical, 95% CI [+0.50, +0.67]).
+- Hybrid RRF adds nothing over pure vector on this eval set (Δ −0.000; 26 of 35 queries unchanged).
+- Rerank was significant on train (+0.036, CI [+0.005, +0.068]). On test it is +0.029, but the CI [−0.003, +0.061] crosses 0.
+- The corpus is synthesized in semantic clusters, which favors embeddings. The ordering between strategies is reliable; the absolute values do not transfer to real social data.
+- Citation accuracy and hallucination rate come from an LLM judge, and review showed it over-reports problems. Treat those two numbers as upper bounds on error.
+- When Claude is unavailable, the local risk keyword list catches only 13 of 19 held-out risk queries.
 
 ---
 
@@ -126,8 +142,13 @@ export ANTHROPIC_API_KEY=...
 | Backend API | http://localhost:8080 |
 | RabbitMQ management UI | http://localhost:15672 (guest / guest) |
 | PostgreSQL / Redis | localhost:5432 / localhost:6379 |
+| Actuator (metrics) | http://127.0.0.1:8081/actuator/metrics |
 
-Without `VOYAGE_API_KEY`, posting still works but no embeddings are generated; without `ANTHROPIC_API_KEY`, the app starts normally but Q&A is unavailable.
+Without `VOYAGE_API_KEY`, posting and keyword search still work, but no embeddings are generated and semantic search is unavailable.
+Without a valid `ANTHROPIC_API_KEY`, the app starts normally and Q&A degrades to semantic search results.
+
+Other optional settings: `AI_BUDGET_DAILY_USD` (daily Claude cost cap), `CORS_ALLOWED_ORIGINS` (default `http://localhost:3000`).
+`NEXT_PUBLIC_API_BASE_URL` (see `frontend/.env.example`) is inlined at `next build` time, so in Docker it is a build arg, not a runtime variable.
 
 ### Local development
 
@@ -166,7 +187,7 @@ All endpoints except `/register`, `/login`, `/ping`, and `/ws/**` require `Autho
 | Feed | `GET /posts` (latest) · `GET /posts/following` · `GET /posts/friends` |
 | Interactions | `POST/DELETE /posts/{pid}/like` · `GET/POST /posts/{postId}/comments` · `DELETE /comments/{cid}` |
 | Notifications | `GET /notification/unread-count` · `POST /notification/mark-read` · `GET /notification/list` |
-| Search | `GET /posts/search?q=` · `GET /posts/search/semantic?q=&k=` · `GET /posts/search/ask?q=` |
+| Search | `GET /posts/search?q=` · `GET /posts/search/semantic?q=&k=` · `GET /posts/search/ask?q=` · `GET /posts/search/ask/stream?q=` (SSE) · `GET /posts/search/retrieval?q=&k=` |
 | Files | `POST /upload` |
 | Real-time | `WS /ws` (STOMP) |
 
@@ -192,21 +213,21 @@ Most docs are written in Chinese.
 
 | Doc | Contents |
 |---|---|
-| [docs/RAG_ROADMAP.md](docs/RAG_ROADMAP.md) | RAG implementation roadmap (18-day plan and progress) |
-| [docs/EVAL.md](docs/EVAL.md) | Retrieval and generation evals: methodology, numbers, analysis |
+| [docs/EVAL.md](docs/EVAL.md) | Retrieval and generation evals: corpus, eval-set construction, final test numbers, failed attempts, limitations |
+| [docs/DESIGN.md](docs/DESIGN.md) | Design decisions (ADRs) for search and Q&A, and known limitations |
 | [docs/CORPUS_DESIGN.md](docs/CORPUS_DESIGN.md) | Stratified design of the eval corpus |
 | [docs/ENTITY_SCHEMA.md](docs/ENTITY_SCHEMA.md) | Entities and table schemas |
 | [docs/CONCURRENCY_OPTIMIZATION.md](docs/CONCURRENCY_OPTIMIZATION.md) | Concurrency issues and optimizations |
 | [docs/COMMENT_QUEUE_THROUGHPUT_TEST.md](docs/COMMENT_QUEUE_THROUGHPUT_TEST.md) | Comment-queue throughput test |
-| [docs/PROJECT_ANALYSIS.md](docs/PROJECT_ANALYSIS.md) | Overall project analysis |
 
 ## Status
 
-The RAG roadmap is complete through Day 15 (corpus, embeddings, evaluation, hybrid retrieval, rerank, intent routing, cited Q&A, generation eval). Remaining:
-
-- Day 16: wire semantic search and Q&A into the frontend; stream generated answers
-- Day 17: put rerank into production (with fallback); cost, rate limiting, observability
-- Day 18: DESIGN.md and final documentation
+The RAG feature is complete, and the retrieval and generation test sets have each been run once. Known limitations are listed in [docs/DESIGN.md](docs/DESIGN.md#已知局限). The main ones:
+- Chinese lexical search uses trigrams, not true word segmentation.
+- Long posts are not split into chunks.
+- Q&A does not use rerank.
+- Only PUBLIC posts are searchable.
+- The eval set is small and the corpus is synthetic.
 
 ## License
 

@@ -38,7 +38,7 @@ import java.util.Optional;
  *
  * <h3>失败怎么办</h3>
  * 不重试，只记日志。帖子照常可见，只是暂时不能被语义搜索命中（编辑场景下命中的是旧内容）；
- * 漏掉的、过期的、本该删掉的向量，都由重跑 EmbeddingBackfillRunner 修复（它会先做一遍校正）。查漏 SQL 见 RAG_ROADMAP Day 6。
+ * 漏掉的、过期的、本该删掉的向量，都由重跑 EmbeddingBackfillRunner 修复（它会先做一遍校正）。查漏用它的只读体检模式（EMBEDDING_BACKFILL_DRY_RUN=true）。
  */
 @Slf4j
 @Service

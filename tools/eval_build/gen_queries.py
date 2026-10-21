@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""评测 query 的半自动构造（RAG_ROADMAP Day 8 第 1–3 步）。
+"""评测 query 的半自动构造（RAG Day 8 第 1–3 步）。
 
 不调 API：query 由 Claude Code 会话按任务文件直接撰写，脚本只负责抽样、校验与落表。
 

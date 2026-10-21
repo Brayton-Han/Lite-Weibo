@@ -14,7 +14,7 @@ class RetrievalMetricsTest {
 
     private static final double EPS = 1e-3;
 
-    // docs/RAG_ROADMAP.md Day 7 手算练习
+    // 手算过的小例子：相关集 G，两个系统的排序
     private static final Set<String> G = Set.of("A", "B", "C");
     private static final List<String> SYSTEM_JIA = List.of("A", "X", "B", "Y", "C");
     private static final List<String> SYSTEM_YI = List.of("X", "Y", "A", "B", "C");

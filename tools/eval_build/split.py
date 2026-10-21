@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""合并标注并切分 train / test（RAG_ROADMAP Day 8 最后一步）。
+"""合并标注并切分 train / test（RAG Day 8 最后一步）。
 
     python split.py
 

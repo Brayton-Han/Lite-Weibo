@@ -8,7 +8,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 真实调用 Voyage 的冒烟测试，验证 embedding 的语义性质（RAG_ROADMAP Day 4 验收）。
+ * 真实调用 Voyage 的冒烟测试，验证 embedding 的语义性质（RAG Day 4 验收）。
  * 未设置 VOYAGE_API_KEY 时自动跳过，不影响 ./mvnw test。
  *
  * 断言失败时先查 input_type（query/document 是否用反）和维度配置，再怀疑模型。

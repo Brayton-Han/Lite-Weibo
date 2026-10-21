@@ -18,9 +18,9 @@ EVAL = ROOT / "eval"
 WORK = EVAL / "work"            # 含帖子正文（其中有 LWC 派生文本），已在 .gitignore 中
 GUIDE = EVAL / "LABELING_GUIDE.md"
 
-DEFAULT_MODEL = "claude-sonnet-5"   # RAG_ROADMAP Day 8 指定
+DEFAULT_MODEL = "claude-sonnet-5"   # RAG Day 8 指定
 
-# 五种 query 类型与目标条数（RAG_ROADMAP Day 8）
+# 五种 query 类型与目标条数（RAG Day 8）
 QUOTAS = {"keyword": 15, "synonym": 20, "mixed": 10, "resonance": 25, "no_answer": 10}
 # query 类型 → 它所服务的语料层；Day 9 按层分组报数要用
 TYPE_LAYER = {"keyword": "experience", "synonym": "experience", "mixed": "experience",

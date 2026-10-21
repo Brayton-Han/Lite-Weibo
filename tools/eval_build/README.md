@@ -1,6 +1,6 @@
 # 评测集构造（Day 8）
 
-docs/RAG_ROADMAP.md **Day 8** 的实现：产出 80 条 query + 分级相关性标注，切成 train / test。
+产出 80 条 query + 分级相关性标注，切成 train / test。方法与结果见 `docs/EVAL.md` §2。
 
 ## 流程
 
