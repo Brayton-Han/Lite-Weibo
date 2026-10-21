@@ -17,7 +17,7 @@
 
 #### 1. 启动所有必要服务
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
 确保 RabbitMQ、PostgreSQL、Redis 都已启动：
@@ -30,14 +30,14 @@ docker ps | grep weibo
 **方式A：启动完整应用进行压测**
 ```bash
 cd backend
-TEST_MODE=comment-throughput mvn spring-boot:run
+TEST_MODE=comment-throughput ./mvnw spring-boot:run
 ```
 
 **方式B：通过 Maven 编译后运行**
 ```bash
 cd backend
 mvn clean compile
-TEST_MODE=comment-throughput mvn spring-boot:run
+TEST_MODE=comment-throughput ./mvnw spring-boot:run
 ```
 
 #### 3. 查看结果

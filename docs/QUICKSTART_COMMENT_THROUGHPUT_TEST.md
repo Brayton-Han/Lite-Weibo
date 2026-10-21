@@ -2,32 +2,18 @@
 
 ## 🚀 最快开始方式（< 2 分钟）
 
-### 方式1：使用交互式脚本（推荐）
-
-```bash
-# 进入项目根目录
-cd Lite-Weibo
-
-# 运行测试脚本
-./run_comment_throughput_test.sh
-```
-
-然后按照提示选择测试方式和参数。
-
----
-
-### 方式2：使用 Spring Boot（完整测试）
+### 使用 Spring Boot 压测（推荐）
 
 ```bash
 # 确保 Docker 服务已启动
-docker-compose up -d
+docker compose up -d
 
 # 等待服务启动（约 20 秒）
 sleep 20
 
 # 运行压测
 cd backend
-TEST_MODE=comment-throughput mvn spring-boot:run
+TEST_MODE=comment-throughput ./mvnw spring-boot:run
 ```
 
 **预期耗时：1-2 分钟**
@@ -55,7 +41,7 @@ TEST_MODE=comment-throughput mvn spring-boot:run
 ### Spring Boot
 使用环境变量：
 ```bash
-THROUGHPUT=2000 DURATION=60 TEST_MODE=comment-throughput mvn spring-boot:run
+THROUGHPUT=2000 DURATION=60 TEST_MODE=comment-throughput ./mvnw spring-boot:run
 ```
 
 ---
@@ -124,7 +110,7 @@ P99 延迟: 2-5 ms
 # @RabbitListener(queues = ..., concurrency = "20-30")
 
 # 重新启动
-docker-compose restart backend
+docker compose restart backend
 ```
 
 ---
@@ -153,7 +139,7 @@ docker-compose restart backend
 
 ✅ 运行测试
 ```bash
-./run_comment_throughput_test.sh
+cd backend && THROUGHPUT=1000 DURATION=30 TEST_MODE=comment-throughput ./mvnw spring-boot:run
 ```
 
 ✅ 查看结果
