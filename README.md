@@ -1,702 +1,213 @@
-# Lite-Weibo System Architecture
+# Lite-Weibo
 
-## Overview
+A Weibo-style social platform built with Spring Boot + Next.js on PostgreSQL / Redis / RabbitMQ, started with a single Docker Compose command.
+Beyond the usual social features, the project focuses on two things:
 
-Lite-Weibo is a scalable, cloud-native social media platform inspired by Twitter. It's designed as a multi-tier, event-driven distributed system that supports high-concurrency read/write operations with real-time notifications through WebSocket connections.
-
-The system consists of three main layers:
-- **Frontend**: Next.js web application for user interaction
-- **Backend**: Spring Boot microservices with RESTful API
-- **Infrastructure**: PostgreSQL, Redis, RabbitMQ, Docker containers
+1. **High-concurrency read/write paths**: hybrid push/pull feed, two-level post snapshot cache, Redis like counters with async write-back, and events published only after the transaction commits.
+2. **Semantic search and cited Q&A (RAG)**: pgvector retrieval + intent routing + Claude citations, backed by a purpose-built corpus and labeled eval set. Every claim comes with reproducible numbers (see [docs/EVAL.md](docs/EVAL.md)).
 
 ---
 
-## Technology Stack
+## Features
 
-### Frontend
-- **Framework**: Next.js 16 (React 19)
-- **Language**: TypeScript
-- **Styling**: Tailwind CSS 4
-- **State Management**: React hooks
-- **Real-time Communication**: WebSocket (STOMP.js, SockJS)
-- **HTTP Client**: Axios
-- **UI Components**: Lucide React icons, React Hot Toast (notifications)
-- **Media**: HEIC2Any (image format conversion)
-
-### Backend
-- **Framework**: Spring Boot 3.5.7
-- **Language**: Java 21
-- **Database**: PostgreSQL 15 (JPA/Hibernate ORM)
-- **Caching**: Redis 7
-- **Message Queue**: RabbitMQ 3 (AMQP)
-- **Real-time**: Spring WebSocket with STOMP
-- **Authentication**: JWT (java-jwt 4.4.0)
-- **File Storage**: AWS S3 (S3 SDK 2.25.13)
-- **Validation**: Spring Boot Validation, Lombok
-
-### Infrastructure
-- **Containerization**: Docker & Docker Compose
-- **Databases**: PostgreSQL, Redis
-- **Message Broker**: RabbitMQ with Management UI
-- **Ports**:
-  - Backend: 8080
-  - Frontend: 3000
-  - PostgreSQL: 5432
-  - Redis: 6379
-  - RabbitMQ: 5672 (AMQP), 15672 (Management UI)
-
-### Message Queue Testing (Python)
-- **Library**: Pika (RabbitMQ Python client)
-- Used for performance testing and latency measurement
+| Area | What's included |
+|---|---|
+| Users | Register / login (JWT), profile and avatar editing, user directory |
+| Relationships | Follow / unfollow; follower, following, and mutual-friend lists |
+| Posts | Create (multiple images, HEIC supported), edit, delete, repost; visibility: public / followers / friends / private |
+| Feed | Latest square, following-based recommendations, friend circle; cursor pagination |
+| Interactions | Likes, comments, comment deletion, liked-posts list |
+| Notifications | Follow / like / comment notifications, unread badge, real-time WebSocket push |
+| Search | Keyword search (Chinese via `pg_trgm`, English via `tsvector`), semantic search, on-site Q&A |
 
 ---
 
-## Architecture Layers
+## Tech Stack
 
-### 1. Frontend Layer (Next.js)
-
-#### Structure
-```
-src/
-├── app/                          # Next.js app directory (routing)
-│   ├── page.tsx                 # Home page
-│   ├── login/page.tsx           # Authentication
-│   ├── register/page.tsx        # User registration
-│   ├── search/page.tsx          # Global search
-│   ├── notifications/page.tsx   # Real-time notifications
-│   ├── following/page.tsx       # Feed (following users' posts)
-│   ├── friends/page.tsx         # Friends management
-│   ├── users/page.tsx           # User directory
-│   └── user/[id]/               # User profile with nested routes
-│       ├── followers/
-│       ├── following/
-│       ├── friends/
-│       └── liked/
-├── components/                  # Reusable React components
-│   ├── Navbar.tsx              # Navigation header
-│   ├── CreatePostWidget.tsx    # Post creation
-│   ├── PostCard.tsx            # Post display
-│   ├── EditPostModel.tsx       # Post editing
-│   ├── RepostModal.tsx         # Repost functionality
-│   ├── SearchResults.tsx       # Search result display
-│   ├── UserProfileClient.tsx   # User profile display
-│   ├── NotificationsClient.tsx # WebSocket notification handler
-│   ├── ToastProvider.tsx       # Toast notification provider
-│   └── Square.tsx              # Layout component
-└── lib/
-    ├── api.ts                  # API client configuration
-    ├── imageUtils.ts           # Image handling utilities
-    └── types/index.ts          # TypeScript type definitions
-```
-
-#### Key Features
-- **Server-Side Rendering (SSR)**: Leverages Next.js for performance and SEO
-- **Real-time Notifications**: WebSocket client (SockJS + STOMP) subscribes to user-specific channels
-- **Infinite Scroll**: Implements cursor-based pagination for feeds
-- **Image Handling**: Supports HEIC format conversion for iOS images
-- **Toast Notifications**: User feedback for actions (created, updated, deleted)
-- **Responsive Design**: Tailwind CSS for mobile-first responsive UI
+- **Backend**: Java 21, Spring Boot 3.5, Spring Security + JWT, Spring Data JPA, Flyway, Caffeine, Spring AMQP, STOMP WebSocket
+- **Frontend**: Next.js 16, React 19, TypeScript, Tailwind CSS 4, Axios, STOMP.js / SockJS
+- **Storage & middleware**: PostgreSQL 15 + pgvector / pg_trgm, Redis 7 (AOF), RabbitMQ 3, Cloudflare R2 (images)
+- **AI**: Voyage AI (`voyage-4` embeddings, `rerank-3` reranking), Claude (official `anthropic-java` SDK, default model `claude-haiku-5-5`)
+- **Load testing**: Python Pika (`pika/`), comment-queue throughput runner
 
 ---
 
-### 2. Backend Layer (Spring Boot)
-
-#### Architecture Diagram
+## Architecture
 
 ```
-┌─────────────────────────────────────┐
-│         REST API Clients            │
-│     (Web/Mobile Frontend)           │
-└────────────────┬────────────────────┘
-                 │
-      ┌──────────┴──────────┐
-      │                     │
-   REST APIs          WebSocket/STOMP
-      │                     │
-┌─────┴──────────────────────────┐
-│      Spring Security            │
-│    (JWT Authentication Filter)  │
-└────────────────┬────────────────┘
-                 │
-┌────────────────┴─────────────────────┐
-│         8 Controller Layer            │
-│  (User, Post, Comment, Like, Follow) │
-└────────────────┬─────────────────────┘
-                 │
-┌────────────────┴──────────────────┐
-│       9 Service Layer             │
-│    (Business Logic & Events)      │
-└───┬─────────────────────────┬─────┘
-    │                         │
-    │                    ApplicationEventPublisher
-    │                         │
-┌───┴──────────────────┐  ┌───┴─────────────────┐
-│   PostgreSQL JPA     │  │  RabbitMQ Consumer  │
-│    Repository        │  │   (Async Tasks)     │
-└───┬──────────────────┘  └─────────────────────┘
-    │
-┌───┴──────────────┐
-│  Redis Cache     │
-└──────────────────┘
-
-Also Connected:
-- Cloudflare R2 (Image Storage)
-- WebSocket Broker (Real-time Notifications)
+ Next.js (3000) ──REST──▶ Spring Boot (8080) ◀──STOMP /ws── Browser
+                               │
+        ┌──────────────┬───────┼─────────────┬──────────────────┐
+        ▼              ▼       ▼             ▼                  ▼
+   PostgreSQL        Redis   RabbitMQ   Cloudflare R2     Voyage / Claude
+   tables + vectors  feeds,  notif.       images          embed / rerank /
+   (pgvector)        caches, queues                       generate
+                     counters
 ```
 
-#### Domain Model
+The backend is layered controller → service → repository. Side effects such as MQ messages, feed fan-out, and cache/counter updates always run after the transaction commits
+(via `@TransactionalEventListener(AFTER_COMMIT)` or the [AfterCommit](backend/src/main/java/com/brayton/weibo/common/AfterCommit.java) helper),
+so a rollback never leaves behind ghost notifications or feed entries pointing to nonexistent posts.
+
+### Key read/write designs
+
+- **Hybrid push/pull feed** ([FeedWriteService](backend/src/main/java/com/brayton/weibo/service/FeedWriteService.java)):
+  regular authors fan out new posts to followers' Redis inboxes. Authors with ≥ `feed.pull.follower-threshold` followers (default 10000) switch to pull mode:
+  they only write to their own outbox, which followers merge in at read time.
+- **Two-level post snapshot cache** ([PostCacheService](backend/src/main/java/com/brayton/weibo/service/PostCacheService.java)):
+  Caffeine → Redis → DB. Edits and deletes use delayed double deletion; comment/repost counts are updated in place with a Lua `HINCRBY`; null markers prevent cache penetration, randomized TTLs prevent avalanches, and Redis failures fall back to the database.
+- **Like counts** ([LikeCountService](backend/src/main/java/com/brayton/weibo/service/LikeCountService.java)):
+  the `likes` table is the source of truth, the Redis counter is its real-time projection, and a dirty set is periodically flushed in batches to `posts.like_count`, so hot posts no longer contend for a row lock.
+- **Notifications**: domain events → RabbitMQ (follow / like / comment queues) → persisted → pushed to online users over WebSocket.
+- **Schema**: managed by Flyway (`V1`–`V7`) with `ddl-auto: validate`.
+
+### Semantic search and Q&A (RAG)
+
 ```
-User
-├── Credentials (username, email, password hash)
-├── Profile (avatar, bio, follower/following counts)
-├── Relationships (follows, followers, friends)
-└── Activities (posts, likes, comments, notifications)
-
-Post
-├── Content (text)
-├── Media (images via S3/Cloudflare)
-├── Metadata (created_at, updated_at, like_count, comment_count)
-├── Relations (author, reposts, comments)
-└── Social (likes, replication to follower feeds)
-
-Comment
-├── Author
-├── Parent Post
-└── Content
-
-Like
-├── User
-├── Post or Comment
-└── Timestamp
-
-Follow
-├── Follower
-├── Following
-└── Created At
-
-Notification
-├── Type (POST, COMMENT, LIKE, FOLLOW, REPOST)
-├── Recipient
-├── Source (triggering user/post)
-└── Metadata (read status)
+query ──▶ IntentClassifier (Claude)
+            ├─ RISK        → crisis message and help resources; no retrieval, no generation
+            ├─ RESONANCE   → semantic search results; no generation
+            └─ EXPERIENCE  → vector retrieval top-k
+                               ├─ top-1 cosine < 0.40 → "no related discussion on the site" (no model call)
+                               └─ Claude + citations → answer with source-post citations on every sentence
 ```
 
-#### Project Structure
-```
-src/main/java/com/brayton/weibo/
-├── WeiboApplication.java               # Spring Boot entry point
-├── controller/                         # REST API endpoints
-│   ├── UserController.java            # User management (auth, profile, follow)
-│   ├── PostController.java            # Post CRUD, timeline, search
-│   ├── CommentController.java         # Comment management
-│   ├── LikeController.java            # Like/unlike operations
-│   ├── FollowController.java          # Follow/unfollow, friend management
-│   ├── NotificationController.java    # Notification retrieval
-│   ├── FileController.java            # Media upload (S3 signed URLs)
-│   └── GlobalExceptionHandler.java    # Centralized error handling
-├── service/                            # Business logic
-│   ├── UserService.java               # User operations, authentication
-│   ├── PostService.java               # Post creation, feed generation, timeline
-│   ├── CommentService.java            # Comment operations
-│   ├── LikeService.java               # Like/unlike logic
-│   ├── FollowService.java             # Follow relationships, queries
-│   ├── NotificationService.java       # Notification creation, delivery
-│   ├── FileService.java               # S3 signed URL generation
-│   ├── JWTService.java                # JWT token generation/validation
-│   └── RedisService.java              # Cache operations
-├── repository/                         # Data access (Spring Data JPA)
-│   ├── UserRepository
-│   ├── PostRepository
-│   ├── CommentRepository
-│   ├── LikeRepository
-│   ├── FollowRepository
-│   ├── NotificationRepository
-│   └── [Entity]Repository interfaces
-├── entity/                             # JPA entities (data models)
-│   ├── User.java
-│   ├── Post.java
-│   ├── Comment.java
-│   ├── Like.java
-│   ├── Follow.java
-│   ├── Notification.java
-│   └── [Other entities]
-├── dto/                                # Data Transfer Objects (API contracts)
-│   ├── UserDTO
-│   ├── PostDTO
-│   ├── CommentDTO
-│   ├── NotificationDTO
-│   └── [Response/Request DTOs]
-├── event/                              # Event-driven architecture
-│   ├── Event.java                     # Base event class
-│   ├── EventType.enum                 # Event type enumeration
-│   ├── CommentEvent.java              # Event fired on comment
-│   ├── LikeEvent.java                 # Event fired on like
-│   ├── FollowEvent.java               # Event fired on follow
-│   └── NotificationListener.java      # Event listener for notifications
-├── webSocket/                          # Real-time communication
-│   └── WebSocketPusher.java           # WebSocket message broadcaster
-├── config/                             # Spring configuration
-│   ├── AppConfig.java                 # Application settings
-│   ├── security/                      # Spring Security config
-│   ├── CorsConfig.java                # CORS configuration
-│   ├── RedisConfig.java               # Redis connection pooling
-│   ├── RabbitMQConfig.java            # RabbitMQ queue/exchange setup
-│   └── WebSocketConfig.java           # WebSocket endpoint configuration
-├── common/                             # Utility classes
-│   ├── ChineseUtil.java               # Chinese text processing (tokenization)
-│   ├── FeedRandomizer.java            # Feed shuffling/recommendation logic
-│   ├── ImagesConverter.java           # Image format conversion
-│   ├── TimeUtil.java                  # Time/timestamp utilities
-│   └── R2Client.java                  # Cloudflare R2 client (S3-compatible)
-├── enums/                              # Enumeration types
-│   ├── NotificationType.enum          # Notification type constants
-│   ├── LikeType.enum                  # Like target types (Post, Comment)
-│   └── [Other enums]
-└── error/                              # Error handling
-    ├── ErrorCode.java                 # Standardized error codes
-    ├── BusinessException.java         # Custom exception class
-    └── ErrorResponse.java             # Error response structure
-```
+- New and edited posts are embedded incrementally and deleted posts are cleaned up; full backfill and consistency checks are available (`EmbeddingBackfillRunner`).
+- Post content is treated as untrusted input, with three layers of defense: document-block isolation, system-prompt rules, and an output-side `PromptLeakGuard`.
+- The retrieval layer also implements `ts_rank`, weighted RRF hybrid, and Voyage rerank strategies (`retrieval/`). They are currently used for evaluation only and are not yet wired into production endpoints.
 
-#### API Endpoints (Summary)
-```
-Authentication & Users
-  POST   /api/auth/register             # User registration
-  POST   /api/auth/login                # JWT token generation
-  GET    /api/users/:id                 # Get user profile
-  PUT    /api/users/:id                 # Update user profile
-  GET    /api/users/search              # Search users
+**Eval results** (3,000-post stratified corpus, 80 labeled queries, train/test split; details in [docs/EVAL.md](docs/EVAL.md)):
 
-Posts
-  POST   /api/posts                      # Create post
-  GET    /api/posts/:id                 # Get single post
-  PUT    /api/posts/:id                 # Edit post
-  DELETE /api/posts/:id                 # Delete post
-  GET    /api/posts/feed/timeline       # Get user's feed (cursor pagination)
-  GET    /api/posts/search              # Search posts (full-text search)
+| Retrieval strategy (train) | nDCG@10 | MRR | Recall@10 | p50 |
+|---|---|---|---|---|
+| Original `LIKE` + recency sort | 0.082 | 0.229 | 0.031 | 1.0 ms |
+| Lexical `ts_rank` / trigram | 0.257 | 0.675 | 0.104 | 1.8 ms |
+| Pure vector (production) | 0.766 | 0.941 | 0.386 | 2.9 ms |
+| Weighted RRF (k10 N20 w10) | 0.771 | 0.956 | 0.386 | 2.8 ms |
+| RRF + Voyage rerank | **0.807** | **1.000** | 0.395 | 123 ms |
 
-Comments
-  POST   /api/posts/:postId/comments    # Create comment
-  GET    /api/posts/:postId/comments    # List post comments
-  DELETE /api/comments/:id              # Delete comment
+| Generation (test, run once) | Result | Target |
+|---|---|---|
+| Citation accuracy | 92.4% | > 90% |
+| Hallucination rate | 3.8% | < 5% |
+| Refusal accuracy (balanced) | 100% | > 90% |
+| Risk-intent recall | 100% (19 / 19) | = 100% |
+| Answer helpfulness (1–5) | 3.32 | > 3.5 ❌ |
 
-Likes
-  POST   /api/posts/:postId/likes       # Like a post
-  DELETE /api/posts/:postId/likes       # Unlike a post
-
-Follows & Friends
-  POST   /api/users/:id/follow          # Follow user
-  DELETE /api/users/:id/follow          # Unfollow user
-  GET    /api/users/:id/followers       # List followers
-  GET    /api/users/:id/following       # List following
-
-Notifications
-  GET    /api/notifications             # Get unread notifications
-  PUT    /api/notifications/:id/read    # Mark as read
-
-Media
-  GET    /api/upload/signed-url         # Get S3 signed URL for upload
-
-WebSocket
-  WS     /ws                            # WebSocket endpoint (STOMP)
-  SUBSCRIBE /user/queue/notifications   # User-specific notifications
-```
+RRF's gain over pure vector is within the confidence interval and not significant; rerank's gain is significant (nDCG +0.036, 95% CI [+0.005, +0.068]).
+Citation accuracy and hallucination rate are judged by an LLM judge; manual review found it over-reports problems, so treat those two numbers as upper bounds on error.
 
 ---
 
-### 3. Data Storage & Caching
+## Quick Start
 
-#### PostgreSQL (Primary Database)
-- **purpose**: ACID-compliant persistent storage for all domain entities
-- **Schema**: User, Post, Comment, Like, Follow, Notification tables
-- **Queries**: JPA Repositories with custom JPQL/SQL for complex queries (feeds, search, aggregations)
-- **Optimization**: Indexes on frequently queried columns (user_id, created_at, follower relationships)
-
-#### Redis (Cache & Speed Layer)
-Used for:
-- **Feed Cache**: Pre-computed feeds for active users (hot data)
-- **User Session Data**: JWT token blacklisting, temporary session state
-- **Post Aggregations**: Like counts, comment counts, engagement metrics
-- **Rate Limiting**: API request throttling per user
-- **Real-time Presence**: Online user tracking
-
-#### RabbitMQ (Message Queue)
-- **Purpose**: Decouple event producers (post creation, likes, follows) from notification consumers
-- **Queues**:
-  - `notification_queue`: Notifications awaiting delivery to WebSocket
-  - `feed_fanout_queue`: (Optional) For distributed feed generation
-- **Flow**: 
-  1. User action triggers event (e.g., post created)
-  2. Event published to RabbitMQ
-  3. Event listener consumes message asynchronously
-  4. Notification created and pushed to user via WebSocket
-  5. Message acknowledged and removed from queue
-
----
-
-## Data Flow & Communication Patterns
-
-### 1. Timeline Feed Generation (Hybrid Approach)
-
-**Fan-out on Write + Fan-in on Read**
-
-#### Write-Time (When user posts):
-```
-User Creates Post
-└─> Post saved to PostgreSQL
-    └─> Event: POST_CREATED published
-        └─> For each follower:
-            └─> Add post reference to Redis follower feed cache
-                (bloom filters to detect duplicates)
-                └─> Lazy persist to feed_events table (optional archival)
-```
-
-#### Read-Time (When user loads feed):
-```
-User Requests Timeline
-└─> Check Redis cache first (follower feed)
-    ├─> Cache HIT: Return cursor-paginated results
-    └─> Cache MISS or expired:
-        └─> Fan-in: Query PostgreSQL (user's followed posts + cached trending)
-            ├─> Apply cursor-based pagination (efficient large datasets)
-            ├─> Cache result in Redis with TTL
-            └─> Return to client
-```
-
-**Trade-offs**:
-- **Write amplification**: Reduced (not every follower gets immediate storage copy)
-- **Read latency**: Optimized (cache hits serve in milliseconds)
-- **Scalability**: Handles large follower graphs with acceptable memory usage
-
-### 2. Real-time Notification Flow
-
-```
-User Action (Like, Comment, Follow, etc.)
-├─> Action processed in Service layer
-├─> Domain Event created (CommentEvent, LikeEvent, etc.)
-├─> Event published to RabbitMQ
-│   └─> Event serialized to JSON
-│       └─> Message sent to notification_queue
-├─> AMQP Consumer (NotificationListener) receives
-│   ├─> Consumes from notification_queue
-│   ├─> Creates Notification entity
-│   ├─> Saves to PostgreSQL
-│   └─> Publishes to WebSocket channel: /user/{recipientId}/queue/notifications
-└─> Client WebSocket receives
-    └─> Toast notification shown to recipient
-        └─> If user has UI open on that page, updates in real-time
-```
-
-### 3. User Authentication & Authorization
-
-```
-User Login
-└─> POST /api/auth/login
-    ├─> Credentials validated (password hash comparison)
-    ├─> JWT token generated (com.auth0.jwt)
-    ├─> Token embedded with user claims (id, roles, issued_at, expiry)
-    └─> Token returned to client (stored in HTTP-only cookie or localStorage)
-
-Subsequent Requests
-└─> Client includes Authorization: Bearer {JWT} header
-    └─> Spring Security intercepts
-        ├─> Token signature verified
-        ├─> Claims extracted (user ID, roles)
-        └─> Request proceeds with authenticated principal
-```
-
-### 4. Media Upload (Secure Direct Upload)
-
-```
-User Selects Image
-└─> Frontend requests signed URL
-    └─> GET /api/upload/signed-url
-        └─> Backend generates AWS S3 pre-signed URL
-            (valid for 15 minutes, upload-only)
-└─> Frontend uploads directly to S3 (bypasses backend)
-    ├─> Reduces backend bandwidth
-    ├─> Faster upload speeds
-    └─> Server-side signing prevents arbitrary uploads
-└─> On post creation
-    └─> Frontend provides S3 URL
-        └─> Backend stores URL reference in Post entity
-```
-
----
-
-## Event-Driven Architecture
-
-### Event System Design
-
-**Base Event Class**:
-```java
-Event {
-    type: EventType (COMMENT, LIKE, FOLLOW, REPOST, etc.)
-    sourceUserId: Long
-    targetUserId: Long
-    targetPostId: Long
-    metadata: Map<String, Object>
-}
-```
-
-**Event Types**:
-- `POST_CREATED`: New post published
-- `LIKE_ADDED`: User likes post
-- `COMMENT_ADDED`: New comment
-- `FOLLOW`: User follows another user
-- `REPOST`: User reposts another's post
-
-**Event Listener** (NotificationListener.java):
-- Annotated with `@EventListener`
-- Spring automatically wires event-consumer relationships
-- Executes asynchronously for non-blocking processing
-- Creates and persists Notification records
-- Publishes to WebSocket broadcaster
-
-### Benefits
-- **Loose Coupling**: Services don't directly call each other
-- **Scalability**: Event processing can be distributed across microservices
-- **Testability**: Mock events for unit testing
-- **Auditability**: Event log provides system audit trail
-
----
-
-## Error Handling & API Responses
-
-### Centralized Exception Handling
-
-**GlobalExceptionHandler** intercepts:
-- `Exception` → 500 Internal Server Error
-- `BusinessException` → 400/403 Bad Request or Forbidden
-- `JpaObjectRetrievalFailureException` → 404 Not Found
-- `DataIntegrityViolationException` → 400 Duplicate entry
-
-### Error Response Format
-```json
-{
-  "success": false,
-  "data": null,
-  "error": {
-    "code": "USER_NOT_FOUND",
-    "message": "User with ID 123 does not exist",
-    "timestamp": "2026-03-09T10:30:00Z"
-  }
-}
-```
-
-### Typed Error Codes
-- `INVALID_CREDENTIALS`: Authentication failed
-- `USER_NOT_FOUND`: User doesn't exist
-- `POST_NOT_FOUND`: Post doesn't exist
-- `UNAUTHORIZED_ACCESS`: User lacks permission
-- `DUPLICATE_ENTRY`: Constraint violation
-- [50+ more specific error codes]
-
----
-
-## Scalability & Performance Optimization
-
-### 1. Database Optimization
-- **Indexes**: Foreign keys, frequently filtered columns (user_id, created_at)
-- **Query Optimization**: JPA fetch strategies (LAZY loading to prevent N+1 queries)
-- **Connection Pooling**: HikariCP for efficient database connections
-- **Partitioning** (Future): Time-based partitioning for historical data
-
-### 2. Caching Strategy
-- **Post Cache**: Redis sorted sets for user feed (last 500 posts per user)
-- **User Cache**: User metadata (follower counts, profile info)
-- **TTL Invalidation**: Automatic expiry for cache entries
-- **Cache Warming**: Background jobs pre-load popular data
-
-### 3. Read Optimization
-- **Cursor-Based Pagination**: Efficient for large datasets
-  ```
-  ?limit=20&cursor=encoded_last_post_id
-  ```
-  - O(1) query offset vs. O(n) LIMIT/OFFSET
-  - Stable under concurrent insertions
-  
-### 4. Write Optimization
-- **Batch Inserts**: Group notifications, likes
-- **Asynchronous Processing**: Non-blocking event pipeline
-- **Write-Through Cache**: Update cache alongside database
-
-### 5. Network Optimization
-- **CORS**: Configured to allow frontend requests
-- **WebSocket**: Persistent bidirectional connection (reduces polling overhead)
-- **Compression**: Gzip for API responses (Spring Boot auto-configured)
-
----
-
-## Security
-
-### Authentication
-- **JWT (JSON Web Tokens)**: Stateless authentication
-  - Issued on login, verified on each request
-  - Contains user ID, roles, expiry timestamp
-  - Signature prevents tampering
-
-### Authorization
-- **Spring Security**: Role-based access control
-  - User: Standard permissions (post, comment, like)
-  - Admin: (Optional) Moderation, user management
-
-### Data Privacy
-- **Password Hashing**: bcrypt (Spring Security's PasswordEncoder)
-- **HTTPS**: (Production) All traffic over TLS
-- **CORS**: Restricted to known frontend origin
-- **SQL Injection Prevention**: JPA parameterized queries
-
-### Media Security
-- **S3 Presigned URLs**: Time-limited upload tokens
-  - User can only upload their own media
-  - No direct S3 credentials exposed to client
-- **Content Validation**: File type, size validation
-
----
-
-## Deployment & Containerization
-
-### Docker Compose Architecture
-```
-docker-compose.yml orchestrates:
-├── PostgreSQL container
-│   └─> Mounts pgdata volume (persistent storage)
-├── Redis container
-│   └─> In-memory caching
-├── RabbitMQ container
-│   └─> Management UI at 15672
-├── Backend Spring Boot container
-│   ├─> Depends on: PostgreSQL, Redis, RabbitMQ
-│   ├─> Exposes: 8080
-│   └─> Env: Database URLs, Redis host, RabbitMQ host
-└── Frontend Next.js container
-    ├─> Depends on: Backend
-    ├─> Exposes: 3000
-    └─> Env: NEXT_PUBLIC_API_BASE_URL=http://localhost:8080
-```
-
-### Network & Volumes
-- **Network**: Docker creates internal network for service-to-service communication
-- **Volumes**: `pgdata` volume persists database between container restarts
-- **Environment Variables**: Injected at container startup
-
----
-
-## Deployment Steps
+Requires Docker Desktop; local development additionally needs JDK 21 and Node.js.
 
 ```bash
-# Build and start all services
-docker-compose up --build
+# 1. Backend config (application.yml is gitignored)
+cp backend/src/main/resources/application.yml.example backend/src/main/resources/application.yml
+#    fill in jwt.secret, R2 credentials, etc.
 
-# Services become available at:
-# Frontend: http://localhost:3000
-# Backend API: http://localhost:8080
-# RabbitMQ Admin: http://localhost:15672 (guest/guest)
-# PostgreSQL: localhost:5432
+# 2. Optional: keys for semantic search / Q&A, passed only via environment variables
+export VOYAGE_API_KEY=...
+export ANTHROPIC_API_KEY=...
+
+# 3. Start everything
+./start.sh                 # build the backend JAR and start all services
+./start.sh --skip-build    # start using the existing JAR
+./start.sh logs | down | clean | backfill
 ```
 
----
+`docker compose up -d --build` works too. Once running:
 
-## Development Workflow
+| Service | Address |
+|---|---|
+| Frontend | http://localhost:3000 |
+| Backend API | http://localhost:8080 |
+| RabbitMQ management UI | http://localhost:15672 (guest / guest) |
+| PostgreSQL / Redis | localhost:5432 / localhost:6379 |
 
-### Frontend Development
+Without `VOYAGE_API_KEY`, posting still works but no embeddings are generated; without `ANTHROPIC_API_KEY`, the app starts normally but Q&A is unavailable.
+
+### Local development
+
 ```bash
-cd frontend
-npm install
-npm run dev          # Start Next.js dev server on port 3000
+cd backend && ./mvnw spring-boot:run     # needs reachable PostgreSQL / Redis / RabbitMQ
+cd backend && ./mvnw test                # unit tests
+cd frontend && npm ci && npm run dev     # dev server
+cd frontend && npm run lint
 ```
 
-### Backend Development
-```bash
-cd backend
-./mvnw spring-boot:run  # Start Spring Boot on port 8080
+### Offline tools (`tools` profile)
+
+Each tool is toggled by an environment variable; run from `backend/` with `... ./mvnw spring-boot:run -Dspring-boot.run.profiles=tools`:
+
+| Switch | Purpose |
+|---|---|
+| `CORPUS_IMPORT=true` | Import the eval corpus from `corpus/` |
+| `EMBEDDING_BACKFILL=true` | Fully backfill / reconcile post embeddings |
+| `EVAL_RUN=true` | Retrieval eval (`EVAL_STRATEGIES=like,tsrank,vector,rrf,rerank-voyage`) |
+| `GEN_EVAL=answers,judge,intent,summary` | Generation-layer eval |
+| `FEED_BACKFILL=true` (no tools profile needed) | Rebuild Redis feeds from PostgreSQL |
+
+For the comment-queue throughput test, see [docs/QUICKSTART_COMMENT_THROUGHPUT_TEST.md](docs/QUICKSTART_COMMENT_THROUGHPUT_TEST.md).
+
+---
+
+## API Overview
+
+All endpoints except `/register`, `/login`, `/ping`, and `/ws/**` require `Authorization: Bearer <JWT>`.
+
+| Area | Endpoints |
+|---|---|
+| Users | `POST /register` · `POST /login` · `GET /user/{id}` · `GET /users` · `PUT /set` |
+| Relationships | `POST/DELETE /follow/{id}` · `GET /user/{id}/following` · `/followers` · `/friends` |
+| Posts | `POST /posts` · `PUT /posts/{id}` · `DELETE /posts/{pid}` · `GET /user/{uid}/posts` · `GET /user/{uid}/liked` |
+| Feed | `GET /posts` (latest) · `GET /posts/following` · `GET /posts/friends` |
+| Interactions | `POST/DELETE /posts/{pid}/like` · `GET/POST /posts/{postId}/comments` · `DELETE /comments/{cid}` |
+| Notifications | `GET /notification/unread-count` · `POST /notification/mark-read` · `GET /notification/list` |
+| Search | `GET /posts/search?q=` · `GET /posts/search/semantic?q=&k=` · `GET /posts/search/ask?q=` |
+| Files | `POST /upload` |
+| Real-time | `WS /ws` (STOMP) |
+
+---
+
+## Repository Layout
+
+```
+backend/      Spring Boot app; src/main/java/com/brayton/weibo/ is layered into
+              controller / service / repository / entity / dto / event / config,
+              plus RAG modules: embedding / retrieval / rerank / generation / eval / tools
+frontend/     Next.js app (src/app routes, src/components UI, src/lib API helpers)
+corpus/       3,000-post stratified eval corpus (manifest*.jsonl)
+eval/         Labeled sets (train / test / intent), labeling guide, agreement notes, results
+tools/        Corpus synthesis and eval-set construction scripts
+pika/         RabbitMQ throughput / latency test scripts
+docs/         Design and evaluation docs
 ```
 
-### Database Access
-```bash
-# Connect to PostgreSQL
-psql -h localhost -U postgres -d weibo -p 5432
+## Documentation
 
-# View RabbitMQ queues
-# Navigate to http://localhost:15672 (credentials: guest/guest)
-```
+Most docs are written in Chinese.
 
----
+| Doc | Contents |
+|---|---|
+| [docs/RAG_ROADMAP.md](docs/RAG_ROADMAP.md) | RAG implementation roadmap (18-day plan and progress) |
+| [docs/EVAL.md](docs/EVAL.md) | Retrieval and generation evals: methodology, numbers, analysis |
+| [docs/CORPUS_DESIGN.md](docs/CORPUS_DESIGN.md) | Stratified design of the eval corpus |
+| [docs/ENTITY_SCHEMA.md](docs/ENTITY_SCHEMA.md) | Entities and table schemas |
+| [docs/CONCURRENCY_OPTIMIZATION.md](docs/CONCURRENCY_OPTIMIZATION.md) | Concurrency issues and optimizations |
+| [docs/COMMENT_QUEUE_THROUGHPUT_TEST.md](docs/COMMENT_QUEUE_THROUGHPUT_TEST.md) | Comment-queue throughput test |
+| [docs/PROJECT_ANALYSIS.md](docs/PROJECT_ANALYSIS.md) | Overall project analysis |
 
-## Key Features & Implementation
+## Status
 
-### 1. User Profiles & Relationships
-- User registration with email validation
-- Profile picture upload to S3
-- Follow/unfollow system
-- Follower/following lists
-- Mutual friend detection
+The RAG roadmap is complete through Day 15 (corpus, embeddings, evaluation, hybrid retrieval, rerank, intent routing, cited Q&A, generation eval). Remaining:
 
-### 2. Posts (the "status" analog)
-- Create, edit, delete posts
-- Support for media (images via S3)
-- Like counting (denormalized in cache)
-- Comment threading
-- Repost/share functionality
-- Post search (full-text on title + content)
+- Day 16: wire semantic search and Q&A into the frontend; stream generated answers
+- Day 17: put rerank into production (with fallback); cost, rate limiting, observability
+- Day 18: DESIGN.md and final documentation
 
-### 3. Comments
-- Nested comments on posts
-- Like comments
-- Delete comments (cascade delete with post)
-- Mention/tagging (basic implementation)
+## License
 
-### 4. Trending & Discovery
-- Search posts by keyword (PostgreSQL full-text search)
-- Search users by username/bio
-- Trending hashtags (optional)
-- Follow recommendations (via graph algorithms)
-
-### 5. Real-time Notifications
-- **Types**: Like, Comment, Follow, Repost, Mention
-- **Delivery**: WebSocket push + database persistence
-- **Read Status**: Track notification read/unread state
-- **Batching**: Multiple actions → single notification (optional)
-
-### 6. Feed Algorithm
-- **Following Timeline**: Posts from followed users
-- **Feed Shuffling**: Random ordering (FeedRandomizer class) or chronological
-- **Explore Page**: Trending posts (optional)
-
----
-
-## Performance Metrics (from pika testing)
-
-The `pika/` directory contains RabbitMQ load testing:
-- **Producer**: Sends 1500 messages/second to notification_queue
-- **Consumer**: Measures latency from publish to consumption
-- **Baseline**: Sub-millisecond latency on local setup
-
-This validates the queue's capability to handle notification spikes.
-
----
-
-## Future Enhancements
-
-1. **Microservices**: Split backend into independent services (User, Post, Notification microservices)
-2. **Elasticsearch**: Replace PostgreSQL full-text search for sub-second search latency
-3. **Graph Database**: Neo4j for relationship queries (followers, recommendations)
-4. **ML Recommendations**: Collaborative filtering for feed personalization
-5. **Analytics**: Kafka for event streaming and analytics pipeline
-6. **CDN**: CloudFront for static assets and image distribution
-7. **Rate Limiting**: Redis-based, per-user API throttling
-8. **Horizontal Scaling**: Load balancer (Nginx) in front of multiple backend instances
-
----
-
-## Summary
-
-Lite-Weibo demonstrates a modern, event-driven social platform architecture:
-- **Frontend**: Responsive Next.js web app with real-time WebSocket updates
-- **Backend**: Layered Spring Boot services with clear separation of concerns
-- **Data Layer**: PostgreSQL for persistence, Redis for caching, RabbitMQ for event distribution
-- **Scalability**: Hybrid feed strategy, cursor pagination, async processing
-- **Quality**: Centralized error handling, type-safe DTOs, comprehensive validation
-
-The system is containerized, easily deployable, and architecturally sound for scaling to thousands of concurrent users.
+See [LICENSE](LICENSE).
