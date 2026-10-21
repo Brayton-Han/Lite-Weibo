@@ -11,6 +11,7 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import jakarta.servlet.DispatcherType;
 import lombok.RequiredArgsConstructor;
 
 @Configuration
@@ -40,6 +41,8 @@ public class SecurityConfig {
                         // 允许所有人访问登录和注册端点
                         .requestMatchers("/login", "/register", "ping").permitAll()
                         .requestMatchers("/ws/**").permitAll()
+                        // SseEmitter 结束时的 async dispatch 不经过 JWT 过滤器；原请求已经鉴权过，这里放行，否则响应已提交后再报 Access Denied
+                        .dispatcherTypeMatchers(DispatcherType.ASYNC).permitAll()
                         // 其他所有请求都需要认证
                         .anyRequest().authenticated()
                 )

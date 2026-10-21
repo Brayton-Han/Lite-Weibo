@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { Search, Home, LogIn, Bell, Heart, MessageCircle, UserPlus, X, Users } from 'lucide-react';
 import { useEffect, useState, useRef } from 'react';
-import api from '@/lib/api';
+import api, { WS_URL } from '@/lib/api';
 import { ApiResponse, User, NotificationCounts } from '@/types'; // 使用 index.ts 中的类型
 import { Client } from '@stomp/stompjs';
 
@@ -91,8 +91,7 @@ export default function Navbar() {
   useEffect(() => {
     if (!me) return;
     const token = localStorage.getItem('token');
-    // 注意：这里硬编码了 localhost，生产环境可能需要换成环境变量
-    const wsUrl = `ws://localhost:8080/ws?token=${token}`;
+    const wsUrl = `${WS_URL}/ws?token=${token}`;
     
     const client = new Client({
       brokerURL: wsUrl, 

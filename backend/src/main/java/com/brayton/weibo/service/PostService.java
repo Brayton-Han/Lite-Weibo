@@ -485,6 +485,19 @@ public class PostService {
 
 
 
+    /** 按给定顺序取公开帖子，已删除或已改为非公开的跳过。问答用它把引用来源渲染成帖子卡片 */
+    public List<PostResponse> getPublicPosts(List<Long> ids, Long selfId) {
+        PostBatch batch = loadBatch(ids, selfId);
+        List<PostResponse> result = new ArrayList<>(ids.size());
+        for (Long id : ids) {
+            PostSnapshot post = batch.get(id);
+            if (post != null && post.visibility() == PostVisibility.PUBLIC) {
+                result.add(buildPostResponse(post, batch, false, false));
+            }
+        }
+        return result;
+    }
+
     /**
      * 纯向量语义搜索（RAG Day 6，临时端点，供 Phase 2 打分前人工感受效果）。
      *

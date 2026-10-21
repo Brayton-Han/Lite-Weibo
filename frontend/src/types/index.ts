@@ -117,3 +117,84 @@ export interface NotificationItem {
   createdAt: string;
   read: boolean;
 }
+// --- 站内问答（/posts/search/ask/stream），对应后端 AskResponse / CitedAnswer ---
+
+export type QueryIntent = 'EXPERIENCE' | 'RESONANCE' | 'RISK';
+
+export type AskMode = 'ANSWER' | 'NO_ANSWER' | 'RESONANCE' | 'RISK';
+
+// 拒答发生在哪一层：检索分数不够 / 没有可用帖子 / 模型自己拒答 / 输出过滤拦截
+export type AskRefusal = 'LOW_SCORE' | 'NO_DOCS' | 'MODEL' | 'FILTERED';
+
+export interface Citation {
+  ref: number;        // 角标编号，从 1 开始
+  postId: number;
+  citedText: string;  // API 从原帖逐字截取的片段
+  startChar: number;  // UTF-16 下标，区间无效时为 -1
+  endChar: number;
+}
+
+export interface AnswerSegment {
+  text: string;
+  citations: Citation[];
+}
+
+export interface AnswerSource {
+  ref: number;
+  postId: number;
+  title: string; // "@作者 · 日期"
+}
+
+export interface CitedAnswer {
+  text: string;
+  segments: AnswerSegment[];
+  sources: AnswerSource[];
+}
+
+export interface ScoredPost {
+  post: Post;
+  score: number;
+}
+
+export interface Helpline {
+  name: string;
+  phone: string;
+  note: string;
+}
+
+export interface AskResponse {
+  mode: AskMode;
+  answer: CitedAnswer | null;
+  sourcePosts: Post[] | null;
+  posts: ScoredPost[] | null;
+  message: string | null;
+  refusal: AskRefusal | null;
+  helplines: Helpline[] | null;
+}
+
+// --- 检索详情面板（/posts/search/retrieval），对应后端 RetrievalDetailResponse ---
+
+export interface RetrievalHit {
+  rank: number;
+  postId: number;
+  score: number;
+  author: string | null;  // 帖子已删或改为非公开时为 null
+  snippet: string | null;
+}
+
+export interface FusedHit extends RetrievalHit {
+  lexicalRank: number | null;
+  lexicalContribution: number;
+  vectorRank: number | null;
+  vectorContribution: number;
+}
+
+export interface RetrievalDetail {
+  lexicalMode: 'trigram' | 'ts_rank_cd';
+  lexical: RetrievalHit[];
+  vector: RetrievalHit[];
+  fused: FusedHit[];
+  vectorTop1: number | null;
+  config: { k: number; n: number; rrfK: number; vectorWeight: number; refusalThreshold: number; askTopK: number };
+  timings: { lexicalMs: number; embedMs: number; vectorMs: number };
+}

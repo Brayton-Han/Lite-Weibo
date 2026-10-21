@@ -99,8 +99,8 @@ public class HybridRrfStrategy implements RetrievalStrategy {
         return fuse(rankings, rankings.stream().map(r -> 1.0).toList(), rrfK, k);
     }
 
-    /** 加权 RRF 融合，weights 与 rankings 一一对应；每路内同一帖子只按第一次出现的名次计。 */
-    static List<ScoredPost> fuse(List<List<ScoredPost>> rankings, List<Double> weights, int rrfK, int k) {
+    /** 加权 RRF 融合，weights 与 rankings 一一对应；每路内同一帖子只按第一次出现的名次计。检索详情面板也用它，保证展示的就是这套算法 */
+    public static List<ScoredPost> fuse(List<List<ScoredPost>> rankings, List<Double> weights, int rrfK, int k) {
         if (weights.size() != rankings.size()) {
             throw new IllegalArgumentException("weights and rankings must have the same size");
         }

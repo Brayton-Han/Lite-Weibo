@@ -1463,17 +1463,54 @@ D: 0        + 1/(60+2) = 0.01613
 
 ### 🛠 开发 checklist
 
-- [ ] 搜索页：输入框 + 结果列表 + "AI 回答"区域
-- [ ] **SSE 流式输出**：后端用 `SseEmitter` 转发 Claude 的 stream，前端逐字渲染
-      （不流式的话用户要干等 3–5 秒，演示效果差很多）
-- [ ] 引用渲染：回答里的引用做成上标或高亮，hover 显示原文片段，点击跳转原帖
-- [ ] 拒答时的空状态设计
-- [ ] **加一个"检索详情"折叠面板**（这是演示神器）：展示词面路 top-5、向量路 top-5、
-      RRF 融合后的排序、每条的分数。面试时展开这个面板，比说一百句都有用
-- [ ] 硬编码的 `localhost:8080` 抽到 `NEXT_PUBLIC_*`（顺手修 §6.3-26）
+- [x] 搜索页：输入框 + 结果列表 + "AI 回答"区域——2026-10-20 完成：输入框沿用 Navbar，`/search` 顶部新增 `components/AskPanel`，
+      与关键词搜索并行发起问答。**不需要生成的保持原样展示 PostCard**：共鸣类把语义搜索结果作为「Related posts」排在关键词结果前（去重）；
+      经验类才出现 AI 回答卡片。意图到达之前、以及风险类，**关键词结果也不展示**——否则风险类 query 会先看到一屏帖子，绕过了 Day 14 的硬要求。
+      副作用：意图分类失败时整页只有"AI 暂不可用"，不退回关键词结果（与 `AskService` 不降级的口径一致，降级留给 Day 17）
+- [x] **SSE 流式输出**——2026-10-20 完成：`GET /posts/search/ask/stream`（`controller/AskStreamController`），事件依次为
+      `intent` → `delta`* → `result` | `error`，`result` 与非流式接口的 `AskResponse` 同构并以它为准。
+      `ClaudeGateway#stream` 用 `createStreaming` + `MessageAccumulator`，结束后仍走 `CitedAnswerAssembler`，错误分级与用量日志不变；
+      独立线程池 `askTaskExecutor`（4–8 线程、队列 32，满了直接报不可用）。前端 `lib/askStream.ts` 用 fetch 读流（EventSource 带不了 JWT）。
+      几个设计点：
+      - 引用只能在生成结束后组装，所以流式阶段是纯文本，`result` 到达后换成带角标的分段渲染（拼起来的全文与 deltas 逐字相同，已实测）
+      - 输出过滤前移：每段 delta 推出去之前对累计文本跑 `PromptLeakGuard`，命中即中止生成并返回 `FILTERED`，
+        推给用户的文本里不会出现完整的 12 字泄露片段（`AskServiceTest#streamingStopsBeforeLeakedFragmentReachesTheClient`）
+      - 用户关页面 → 下一次推送失败 → 抛出中止生成，不再为没人看的回答付输出 token（实测日志 `客户端已断开，中止`）
+      - SseEmitter 结束时的 async dispatch 不经过 JWT 过滤器，`SecurityConfig` 对 `DispatcherType.ASYNC` 放行
+      **实测（本地 + 真实 API）**：「通勤两小时怎么熬」intent 约 2s 到达，首个 delta 再约 3s，共 96 个 delta、5 个引用；
+      共鸣 / 风险 / LOW_SCORE 三条都只有 `intent` + `result`，没调生成
+- [x] 引用渲染——2026-10-20 完成：段尾蓝色数字角标（同段同帖去重），hover 弹出来源标题与 `cited_text` 原文；
+      点击平滑滚动到回答下方「Sources」里对应的原帖 PostCard 并闪一下高亮。站内没有帖子详情页，所以"跳转原帖"是跳到卡片；
+      为此 `AskResponse` 新增 `sourcePosts`（`PostService#getPublicPosts`，按 sources 顺序、只取仍公开的帖子）
+- [x] 拒答时的空状态设计——2026-10-20 完成：NO_ANSWER 显示"站内没有找到相关讨论"，副标题按 `refusal` 说明是哪一层拒的
+      （分数不够 / 帖子已不可用 / 帖子答不了这个问题 / 安全过滤），下方照常给关键词结果；流式中途转成拒答时，已推出的文本被这张卡片替换。
+      风险类是单独的卡片：干预文案 + 热线（可点击拨号），页面上不出现任何帖子
+- [x] **加一个"检索详情"折叠面板**（这是演示神器）：展示词面路 top-5、向量路 top-5、
+      RRF 融合后的排序、每条的分数——2026-10-20 完成：`GET /posts/search/retrieval?q=&k=5`（`service/RetrievalDetailService`，
+      单测 `RetrievalDetailServiceTest`），前端 `components/RetrievalPanel`，挂在 AI 回答下方、默认折叠，**展开时才请求**
+      （要多调一次 embedding，平时不花这笔钱）。和帖子列表同一道门：风险类、意图未知时不出现。
+      - 融合直接调 `HybridRrfStrategy.fuse`（改为 public），配置取 Day 11 选定的 n=20、k=10、w=10；每行带两路名次与各自贡献
+        `1/(k+r_lex)` + `w/(k+r_vec)`。面板每路只列 top-5，但融合用的是每路 top-20，所以融合结果里会出现词面第 15 名这种
+      - 顶部标出向量 top-1 与拒答阈值 0.40，直接解释"为什么这条拒答 / 生成了"；底部注明问答实际用的是向量 top-10，RRF 还没接进问答
+      - hover 任一行，三个列表里同一条帖子一起高亮；另附各路耗时（词面 / embedding / 向量）
+      **实测**：「北京租房押一付三正常吗」词面 top-4 全是只撞上"北京"的噪音（trigram 分数并列 0.167），
+      RRF 把向量路的结果顶上来，词面第 15 名的科普帖因向量第 1 排融合第 1（0.040 + 0.909）——正是 Day 11 选 w=10 的原因；
+      「冰壶比赛怎么计分」向量 top-1 0.298 < 0.40，面板上一眼看出它在生成前就被拒了
+- [x] 硬编码的 `localhost:8080` 抽到 `NEXT_PUBLIC_*`（顺手修 §6.3-26）——2026-10-20 完成：`lib/api.ts` 读 `NEXT_PUBLIC_API_BASE_URL`
+      （没配时退回 `http://localhost:8080`），WebSocket 地址由它推出（http → ws），`Navbar` 不再硬编码；模板 `frontend/.env.example`。
+      ⚠️ 原 `docker-compose.yml` 在 frontend 的**运行时** `environment` 里配了这个变量，但 `NEXT_PUBLIC_*` 是 `next build` 时内联的，
+      那一行从来没生效过——改为 build arg（`Dockerfile` 里 `ARG` → `ENV`）。实测：用哨兵地址 build，产物里出现哨兵、不再有 `localhost:8080`。
+      后端 CORS 同时走配置：`cors.allowed-origins`（默认 `http://localhost:3000`，env `CORS_ALLOWED_ORIGINS` 覆盖），
+      实测允许的源预检 200、其他源 403。WebSocket 端点仍是 `setAllowedOriginPatterns("*")`，没动
 
 ### ✅ 验收标准
 能完整演示一次：输入口语化问题 → 看到流式回答 → 点引用跳转 → 展开检索详情看融合过程。
+
+——2026-10-20：链路的每一段都用真实 API 验过（流式事件、四种意图分流、断开即中止、检索详情的融合数字、CORS）；
+**浏览器里的整段演示由用户手动验收**（开发环境没有浏览器自动化），演示用 query 建议：
+「北京租房押一付三正常吗」（流式 + 引用 + 检索详情里 RRF 把词面第 15 名顶到第 1）、
+「撑不下去了想裸辞」（共鸣类只出帖子）、「冰壶比赛怎么计分」（拒答空状态，详情里 top-1 0.298 < 0.40）、
+「不想活了」（只有热线）
 
 ---
 

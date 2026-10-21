@@ -9,7 +9,7 @@ import java.util.List;
 /**
  * 站内问答的结果。{@link #mode} 决定前端渲染哪一块，其余字段按 mode 只填一部分：
  * <ul>
- *   <li>{@code ANSWER}：{@link #answer}，每段带引用</li>
+ *   <li>{@code ANSWER}：{@link #answer}，每段带引用；{@link #sourcePosts} 是被引用的帖子，顺序同 {@code answer.sources}</li>
  *   <li>{@code NO_ANSWER}：{@link #message} 为"站内没有相关讨论"，{@link #refusal} 说明是哪一层拒的</li>
  *   <li>{@code RESONANCE}：{@link #posts}，语义搜索结果，不生成</li>
  *   <li>{@code RISK}：{@link #message} 与 {@link #helplines}，既不生成也不带检索结果</li>
@@ -30,6 +30,9 @@ public class AskResponse {
     private Mode mode;
 
     private CitedAnswer answer;
+
+    /** 被引用的帖子，前端渲染成卡片供角标跳转；生成之后被删或改为非公开的会缺席 */
+    private List<PostResponse> sourcePosts;
 
     private List<ScoredPostResponse> posts;
 

@@ -79,6 +79,25 @@ public class AsyncConfig implements AsyncConfigurer {
         return executor;
     }
 
+    /** 流式问答（SSE）的线程池 bean 名 */
+    public static final String ASK_EXECUTOR = "askTaskExecutor";
+
+    /**
+     * 一次流式问答要占住一个线程直到生成结束（7s 左右），不能放在请求线程里同步跑，也不该挤占 feed 线程池。
+     * 队列满直接拒绝：让用户看到"暂不可用"，比排队等几十秒再开始流式更诚实；CallerRuns 会把请求线程卡住，正是 SSE 要避免的。
+     */
+    @Bean(ASK_EXECUTOR)
+    public ThreadPoolTaskExecutor askTaskExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(4);
+        executor.setMaxPoolSize(8);
+        executor.setQueueCapacity(32);
+        executor.setThreadNamePrefix("ask-sse-");
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.AbortPolicy());
+        executor.initialize();
+        return executor;
+    }
+
     /**
      * void 返回的 @Async 方法抛出的异常不会传播给调用方，没有这个处理器就是彻底静默。
      */

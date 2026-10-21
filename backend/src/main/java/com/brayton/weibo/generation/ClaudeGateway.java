@@ -1,6 +1,7 @@
 package com.brayton.weibo.generation;
 
 import com.anthropic.client.AnthropicClient;
+import com.anthropic.core.http.StreamResponse;
 import com.anthropic.errors.AnthropicIoException;
 import com.anthropic.errors.AnthropicRetryableException;
 import com.anthropic.errors.AnthropicServiceException;
@@ -9,8 +10,10 @@ import com.anthropic.errors.NotFoundException;
 import com.anthropic.errors.PermissionDeniedException;
 import com.anthropic.errors.RateLimitException;
 import com.anthropic.errors.UnauthorizedException;
+import com.anthropic.helpers.MessageAccumulator;
 import com.anthropic.models.messages.Message;
 import com.anthropic.models.messages.MessageCreateParams;
+import com.anthropic.models.messages.RawMessageStreamEvent;
 import com.anthropic.models.messages.StructuredMessage;
 import com.anthropic.models.messages.StructuredMessageCreateParams;
 import com.anthropic.models.messages.Usage;
@@ -19,6 +22,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -55,6 +59,25 @@ public class ClaudeGateway {
     public Message create(String purpose, MessageCreateParams params) {
         return call(purpose, params.model().asString(),
                 () -> client.messages().create(params), Function.identity());
+    }
+
+    /**
+     * 流式调用：每段文本增量交给 {@code onText}，结束后返回拼好的完整 {@link Message}，与非流式一样走错误分级和用量记录。
+     * 流中途断开同样抛 {@link ClaudeCallException}；{@code onText} 自己抛的异常原样往外抛（用来中止生成），这时不记用量。
+     */
+    public Message stream(String purpose, MessageCreateParams params, Consumer<String> onText) {
+        return call(purpose, params.model().asString(), () -> {
+            MessageAccumulator accumulator = MessageAccumulator.create();
+            try (StreamResponse<RawMessageStreamEvent> response = client.messages().createStreaming(params)) {
+                response.stream().forEach(event -> {
+                    accumulator.accumulate(event);
+                    event.contentBlockDelta()
+                            .flatMap(d -> d.delta().text())
+                            .ifPresent(t -> onText.accept(t.text()));
+                });
+            }
+            return accumulator.message();
+        }, Function.identity());
     }
 
     public <T> StructuredMessage<T> create(String purpose, StructuredMessageCreateParams<T> params) {

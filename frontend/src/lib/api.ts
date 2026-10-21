@@ -1,7 +1,11 @@
 // src/lib/api.ts
 import axios from 'axios';
 
-const API_URL = 'http://localhost:8080'; // 你的后端地址
+// 后端地址。NEXT_PUBLIC_* 在构建时内联进前端包：本地开发写在 .env.local（见 .env.example），
+// Docker 镜像通过 build arg 传入（见 Dockerfile / docker-compose.yml）；都没配时退回本地默认端口
+export const API_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8080';
+// WebSocket 与 API 同一个后端，协议跟着换：http → ws、https → wss
+export const WS_URL = API_URL.replace(/^http/, 'ws');
 
 const api = axios.create({
   baseURL: API_URL,

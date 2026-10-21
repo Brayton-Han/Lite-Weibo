@@ -5,6 +5,9 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import api from '@/lib/api';
 import { ApiResponse, Post } from '@/types';
 import PostCard from './PostCard'; 
+import AskPanel from './AskPanel';
+import RetrievalPanel from './RetrievalPanel';
+import { useAskStream } from '@/lib/useAskStream';
 import { toast } from 'react-hot-toast';
 import { Flame, Loader2, Search as SearchIcon } from 'lucide-react';
 
@@ -21,6 +24,18 @@ export default function SearchResults() {
   const [loadingMore, setLoadingMore] = useState(false); 
   const [hasMore, setHasMore] = useState(true); 
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+
+  // --- AI 问答：与关键词搜索并行，先拿到意图再决定展示什么 ---
+  const ask = useAskStream(query);
+
+  // 风险类不展示任何帖子；意图未知（分类中、分类失败）时也不展示，免得风险类 query 先看到一屏帖子
+  const showPosts = ask.intent !== null && ask.intent !== 'RISK';
+  // 共鸣类不生成，直接展示语义搜索结果
+  const resonancePosts = ask.result?.mode === 'RESONANCE' ? (ask.result.posts ?? []).map(p => p.post) : [];
+  const resonanceIds = new Set(resonancePosts.map(p => p.id));
+  const keywordPosts = posts.filter(p => !resonanceIds.has(p.id));
+  const askSettled = ask.phase === 'done' || ask.phase === 'error';
+  const askShowsEmptyState = ask.result?.mode === 'ANSWER' || ask.result?.mode === 'NO_ANSWER';
 
   // --- Refs ---
   const observerTarget = useRef<HTMLDivElement>(null);
@@ -159,20 +174,40 @@ export default function SearchResults() {
             Results for "{query}"
           </div>
 
+          <AskPanel state={ask} currentUserId={currentUserId} hasKeywordResults={showPosts && posts.length > 0} />
+
+          {/* 与帖子列表同一道门：风险类、意图未知时不展示检索结果 */}
+          {showPosts && <RetrievalPanel key={query} query={query} />}
+
+          {showPosts && (
           <div className="space-y-4">
+            {resonancePosts.length > 0 && (
+              <>
+                <h2 className="px-1 text-xs font-semibold text-gray-400 uppercase tracking-wider">Related posts</h2>
+                {resonancePosts.map(post => (
+                  <PostCard key={post.id} post={post} currentUserId={currentUserId} onDelete={() => {}} />
+                ))}
+                {keywordPosts.length > 0 && (
+                  <h2 className="px-1 pt-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">Keyword matches</h2>
+                )}
+              </>
+            )}
+
             {loading ? (
               <div className="p-10 text-center text-gray-500 flex flex-col items-center">
                 <Loader2 className="animate-spin mb-2" />
                 Searching...
               </div>
-            ) : posts.length === 0 ? (
-              <div className="bg-white rounded-xl p-10 text-center text-gray-500 shadow">
-                <p className="text-lg font-medium text-gray-900">No results found</p>
-                <p className="mt-1">Try searching for different keywords.</p>
-              </div>
+            ) : keywordPosts.length === 0 ? (
+              resonancePosts.length === 0 && askSettled && !askShowsEmptyState && (
+                <div className="bg-white rounded-xl p-10 text-center text-gray-500 shadow">
+                  <p className="text-lg font-medium text-gray-900">No results found</p>
+                  <p className="mt-1">Try searching for different keywords.</p>
+                </div>
+              )
             ) : (
               <>
-                {posts.map(post => (
+                {keywordPosts.map(post => (
                   <PostCard 
                     key={post.id} 
                     post={post} 
@@ -197,6 +232,7 @@ export default function SearchResults() {
               </>
             )}
           </div>
+          )}
         </main>
         
         {/* --- Right Column (Placeholder) --- */}

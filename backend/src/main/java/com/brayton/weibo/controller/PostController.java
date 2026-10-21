@@ -6,6 +6,7 @@ import com.brayton.weibo.enums.PostVisibility;
 import com.brayton.weibo.service.AskService;
 import com.brayton.weibo.service.FileService;
 import com.brayton.weibo.service.PostService;
+import com.brayton.weibo.service.RetrievalDetailService;
 import jakarta.validation.Valid;
 import lombok.AllArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -23,6 +24,7 @@ public class PostController {
 
     private final PostService postService;
     private final AskService askService;
+    private final RetrievalDetailService retrievalDetailService;
 
     @GetMapping("/user/{uid}/posts")
     public ResponseEntity<ApiResponse<?>> getPosts(
@@ -117,6 +119,16 @@ public class PostController {
     ) {
         List<ScoredPostResponse> posts = postService.getSemanticSearchResults(q, k, self.getId());
         return ResponseEntity.ok(ApiResponse.success(posts));
+    }
+
+    /** 检索详情面板：词面 / 向量两路各自的 top-k 与 RRF 融合过程。见 {@link RetrievalDetailService} */
+    @GetMapping("/posts/search/retrieval")
+    public ResponseEntity<ApiResponse<?>> getRetrievalDetail(
+            @RequestParam String q,
+            @RequestParam(defaultValue = "5") int k,
+            @AuthenticationPrincipal CustomUserDetails self
+    ) {
+        return ResponseEntity.ok(ApiResponse.success(retrievalDetailService.explain(q, k, self.getId())));
     }
 
     /** 站内问答：按意图分流，经验类带引用作答，共鸣类返回搜索结果，风险类返回求助渠道。见 {@link AskService} */

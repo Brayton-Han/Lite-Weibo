@@ -4,6 +4,7 @@ import com.brayton.weibo.dto.AskResponse;
 import com.brayton.weibo.dto.AskResponse.Helpline;
 import com.brayton.weibo.dto.AskResponse.Mode;
 import com.brayton.weibo.dto.AskResponse.Refusal;
+import com.brayton.weibo.dto.PostResponse;
 import com.brayton.weibo.embedding.EmbeddingClient;
 import com.brayton.weibo.embedding.EmbeddingException;
 import com.brayton.weibo.error.CommonErrorCode;
@@ -23,6 +24,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Objects;
 
 /**
  * 站内问答（RAG Day 14）：先分意图，再决定走哪条路，三种情况分别闭嘴。
@@ -46,6 +48,12 @@ import java.util.List;
  * <h3>注入</h3>
  * 帖子是不可信输入，三道防线：document 块隔离 + system 规则 4（{@code AnswerPromptBuilder}），
  * 以及生成后的 {@link PromptLeakGuard}——回答里出现 system prompt 片段就拦下、记日志，按拒答返回。
+ *
+ * <h3>流式</h3>
+ * {@link #askStreaming} 与 {@link #ask} 是同一条路径，只是分类完成后先通知意图、生成时逐段推文本。
+ * 引用、"无引用即拒答"都只能在生成结束后判断，所以最终结果仍以 {@link AskResponse} 为准，已推出的文本可能被它撤回。
+ * 输出过滤不能等到最后：每段文本推出去之前先对累计文本跑 {@link PromptLeakGuard}，命中就中止生成，
+ * 保证推给用户的文本里从来没出现过完整的泄露片段。
  *
  * <h3>失败</h3>
  * 意图分类失败时不猜类别、不降级成搜索结果（风险类 query 可能因此看到一堆同样绝望的帖子），直接报不可用。
@@ -100,6 +108,19 @@ public class AskService {
         return trace(query, selfId).response();
     }
 
+    /** 流式问答的进度回调，在调用 {@link #askStreaming} 的线程上触发 */
+    public interface AskListener {
+        /** 意图分类完成，检索和生成之前 */
+        void onIntent(QueryIntent intent);
+
+        /** 生成的一段文本增量，已过输出过滤 */
+        void onDelta(String text);
+    }
+
+    public AskResponse askStreaming(String query, Long selfId, AskListener listener) {
+        return run(query, selfId, Objects.requireNonNull(listener)).response();
+    }
+
     /**
      * 与 {@link #ask} 同一条路径，额外带出中间结果给评测用：生成层评测的 judge 要看到送进模型的帖子，
      * 意图与拒答指标要看到分类结果和 top-1。线上只用 {@link #ask}。
@@ -110,6 +131,11 @@ public class AskService {
     public record Trace(QueryIntent intent, double top1, List<SourceDoc> docs, AskResponse response) {}
 
     public Trace trace(String query, Long selfId) {
+        return run(query, selfId, null);
+    }
+
+    /** @param listener 为 null 时走非流式生成 */
+    private Trace run(String query, Long selfId, AskListener listener) {
         String q = query == null ? "" : query.strip();
         if (q.isEmpty() || q.length() > PostService.SEMANTIC_QUERY_MAX_LENGTH) {
             throw new WeiboException(CommonErrorCode.SEARCH_QUERY_INVALID);
@@ -122,17 +148,20 @@ public class AskService {
             log.warn("意图分类失败 kind={}，不猜类别：{}", e.kind(), e.getMessage());
             throw new WeiboException(CommonErrorCode.ASK_UNAVAILABLE);
         }
+        if (listener != null) {
+            listener.onIntent(intent);
+        }
 
         return switch (intent) {
             case RISK -> new Trace(intent, Double.NaN, List.of(),
                     AskResponse.builder().mode(Mode.RISK).message(RISK_MESSAGE).helplines(HELPLINES).build());
             case RESONANCE -> new Trace(intent, Double.NaN, List.of(), AskResponse.builder().mode(Mode.RESONANCE)
                     .posts(postService.getSemanticSearchResults(q, topK, selfId)).build());
-            case EXPERIENCE -> answer(q);
+            case EXPERIENCE -> answer(q, selfId, listener);
         };
     }
 
-    private Trace answer(String q) {
+    private Trace answer(String q, Long selfId, AskListener listener) {
         List<ScoredPost> hits = retrieve(q);
         double top1 = hits.isEmpty() ? Double.NEGATIVE_INFINITY : hits.get(0).score();
         if (top1 < minTop1Score) {
@@ -147,7 +176,11 @@ public class AskService {
 
         AnswerGenerator.GeneratedAnswer generated;
         try {
-            generated = generator.generate(q, docs);
+            generated = listener == null ? generator.generate(q, docs) : generateStreaming(q, docs, listener);
+        } catch (LeakAbort e) {
+            log.warn("输出过滤：流式回答含 system prompt 片段，已中止生成 posts={} 已生成={}",
+                    docs.stream().map(SourceDoc::postId).toList(), e.streamed);
+            return new Trace(QueryIntent.EXPERIENCE, top1, docs, noAnswer(Refusal.FILTERED));
         } catch (ClaudeCallException e) {
             log.warn("生成失败 kind={}：{}", e.kind(), e.getMessage());
             throw new WeiboException(CommonErrorCode.ASK_UNAVAILABLE);
@@ -164,7 +197,31 @@ public class AskService {
             log.info("拒答 reason=MODEL top1={} 回答={}", top1, answer.text());
             return new Trace(QueryIntent.EXPERIENCE, top1, docs, noAnswer(Refusal.MODEL));
         }
-        return new Trace(QueryIntent.EXPERIENCE, top1, docs, AskResponse.builder().mode(Mode.ANSWER).answer(answer).build());
+        List<PostResponse> sourcePosts = postService.getPublicPosts(
+                answer.sources().stream().map(CitedAnswer.Source::postId).toList(), selfId);
+        return new Trace(QueryIntent.EXPERIENCE, top1, docs,
+                AskResponse.builder().mode(Mode.ANSWER).answer(answer).sourcePosts(sourcePosts).build());
+    }
+
+    /** 每段文本推出去之前先对累计文本做输出过滤，命中即抛 {@link LeakAbort} 中止流 */
+    private AnswerGenerator.GeneratedAnswer generateStreaming(String q, List<SourceDoc> docs, AskListener listener) {
+        StringBuilder streamed = new StringBuilder();
+        return generator.generateStreaming(q, docs, text -> {
+            streamed.append(text);
+            if (PromptLeakGuard.leaks(streamed.toString())) {
+                throw new LeakAbort(streamed.toString());
+            }
+            listener.onDelta(text);
+        });
+    }
+
+    private static final class LeakAbort extends RuntimeException {
+        final String streamed;
+
+        LeakAbort(String streamed) {
+            super(null, null, false, false);
+            this.streamed = streamed;
+        }
     }
 
     /** 与 Day 14 阈值校准同一条检索：voyage-4 向量、PUBLIC 帖子、按余弦从高到低 */
