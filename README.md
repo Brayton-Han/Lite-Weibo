@@ -200,7 +200,8 @@ backend/      Spring Boot app; src/main/java/com/brayton/weibo/ is layered into
               controller / service / repository / entity / dto / event / config,
               plus RAG modules: embedding / retrieval / rerank / generation / eval / tools
 frontend/     Next.js app (src/app routes, src/components UI, src/lib API helpers)
-corpus/       3,000-post stratified eval corpus (manifest*.jsonl)
+corpus/       Synthetic part of the eval corpus (manifest.jsonl, 2,100 posts); the 900-post noise layer
+              is rebuilt locally from the Leiden Weibo Corpus (CC BY-NC-SA, not redistributed)
 eval/         Labeled sets (train / test / intent), labeling guide, agreement notes, results
 tools/        Corpus synthesis and eval-set construction scripts
 pika/         RabbitMQ throughput / latency test scripts

@@ -61,7 +61,7 @@ python generate.py submit --style-samples my_posts.txt   # 带语感锚点
 ⚠️ 如果样本来自你自己的微博：内容著作权是你的，但**获取方式仍受 ToS 约束**——
 走官方数据导出或手动复制，不要写爬虫抓自己的主页。转发的内容不是你的原创，先剔掉。
 
-输出落在仓库根的 `corpus/`，该目录已在 `.gitignore` 中——LWC 是
+输出落在仓库根的 `corpus/`。只有合成的 `manifest.jsonl` 进仓库，其余都在 `.gitignore` 中——LWC 是
 **CC BY-NC-SA**，派生文本进了公开仓库会被卷入同一许可（docs/CORPUS_DESIGN.md §5）。
 
 ## 两个设计决定

@@ -4,10 +4,12 @@ __pycache__/
 .venv/
 
 # RAG 评测语料的产出与原始数据。
-# corpus/ 含 LWC 派生文本与个人语感锚点样本；LWC-messages/ 是 2.3GB 原始语料。
-# 两者都受 CC BY-NC-SA 3.0 约束——SA 条款会让派生物进入公开仓库时被卷入同一许可。
-# 重建方式见 tools/corpus_gen/README.md。
-corpus/
+# corpus/ 只公开 manifest.jsonl：经验类 + 共鸣类共 2100 条，全部为合成 / 人工补写，不含第三方文本。
+# 其余不进仓库：noise*.jsonl 是 LWC 派生文本（CC BY-NC-SA 3.0，与本仓库的 MIT 冲突，且是真实用户帖子）；
+# style_samples.txt 是真实微博；其余 manifest_* 与 .batch_state.json 是合成过程的中间产物。
+# LWC-messages/ 是 2.3GB 原始语料。噪声层的重建方式见 tools/corpus_gen/README.md。
+corpus/*
+!corpus/manifest.jsonl
 LWC-messages/
 
 # 私人文稿，只留本地：项目分析与面试准备、RAG 学习计划（含面试钩子与简历模板）、面试稿。

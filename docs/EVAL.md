@@ -41,7 +41,7 @@ AI 问答先做意图分类，经验类问题在检索结果上用 Claude 生成
 - 库里另有 157 条开发测试时发的真实帖子，从未标注，评测时从结果中剔除（见 §3 口径）
 - 噪声层没有做语义复筛，约 150–270 条与靶区话题语义重叠。它们靠 pooling 照常标注（§2），最终有 10 条被标为相关
 - **许可**：噪声层来自 [Leiden Weibo Corpus](https://lwc.daanvanesch.nl/openaccess.php)，**CC BY-NC-SA 3.0**。
-  按 SA 条款，LWC 派生的帖子文本不进 git，只提交导入脚本与合成语料。另外核查过 4 个更常见的微博数据集
+  按 SA 条款，LWC 派生的帖子文本不进 git：仓库里公开的是合成的 2100 条（`corpus/manifest.jsonl`）与导入脚本，噪声层 900 条要从 LWC 重建。另外核查过 4 个更常见的微博数据集
   （`weibo_senti_100k` 及其在 Kaggle / IEEE DataPort 的转载），都没有许可，排除
 
 ## 2. 评测集怎么来的
@@ -337,6 +337,11 @@ EVAL_RUN=true VOYAGE_API_KEY=... ./mvnw spring-boot:run \
 
 生成层评测用 `tools/GenerationEvalRunner`（`GEN_EVAL=answers,judge,intent,summary`，`GEN_EVAL_SPLIT`），judge 校准用 `tools/eval_build/gen_calib.py`，见附录 Day 15。
 配对 bootstrap 区间不在 runner 里，用逐 query 明细 `.tsv` 的 `ndcg` / `rr` 列按 qid 配对计算。
+
+**语料能复现到什么程度**：经验类与共鸣类 2100 条在 `corpus/manifest.jsonl`，可以直接导入（`CORPUS_IMPORT=true`）。
+噪声层 900 条不在仓库里（LWC 许可为 CC BY-NC-SA，见 §1），要下载 LWC 后用 `tools/corpus_gen/` 的抽取脚本重建；
+抽样有固定种子，但中间有一步 LLM 过滤，**没有核实过能否逐条复现**。噪声层里有 10 条帖子被标为相关，重建不一致时会影响少量 query 的分数。
+标注（`eval/qrels.tsv`）带 `gen_id`，重建数据库后可按它重新映射 `post_id`。
 
 ---
 
