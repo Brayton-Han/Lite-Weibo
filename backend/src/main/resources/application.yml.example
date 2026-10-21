@@ -71,6 +71,8 @@ r2:
 #   generation:
 #     model: claude-haiku-5-5   # toy 项目语料少，Haiku 够用；效果不够再换 claude-sonnet-5-5
 #     max-tokens: 16000
+#   judge:
+#     model: claude-haiku-4-5   # 仅评测用（eval/GenerationJudge）；不能与 generation.model 相同，judge 不能给自己打分
 
 # 站内问答（可选，以下为默认值）。阈值针对 voyage-4 向量 top-1 余弦校准（EVAL.md「Day 14 · 拒答阈值」），换模型或检索方案须重新校准。
 # ask:

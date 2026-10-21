@@ -1,0 +1,41 @@
+qid	type	layer	answerable	gold_intent	intent	mode	refusal	top1	citations	citations_ok	claims	unsupported	usefulness
+q003	keyword	experience	true	EXPERIENCE	EXPERIENCE	ANSWER		0.5226	2	2	4	0	3
+q008	keyword	experience	true	EXPERIENCE	EXPERIENCE	ANSWER		0.6846	7	7	8	1	4
+q009	keyword	experience	true	EXPERIENCE	EXPERIENCE	ANSWER		0.6223	1	1	2	0	3
+q011	keyword	experience	true	EXPERIENCE	EXPERIENCE	ANSWER		0.5363	1	1	3	1	2
+q012	keyword	experience	true	EXPERIENCE	EXPERIENCE	ANSWER		0.4952	8	7	9	0	1
+q013	keyword	experience	true	EXPERIENCE	EXPERIENCE	ANSWER		0.5405	13	13	18	2	4
+q014	keyword	experience	true	EXPERIENCE	EXPERIENCE	ANSWER		0.6079	2	2	7	1	4
+q016	synonym	experience	true	EXPERIENCE	EXPERIENCE	ANSWER		0.6719	9	9	7	0	4
+q021	synonym	experience	true	EXPERIENCE	EXPERIENCE	ANSWER		0.6106	5	5	7	0	4
+q023	synonym	experience	true	EXPERIENCE	EXPERIENCE	ANSWER		0.6382	6	2	8	0	4
+q024	synonym	experience	true	EXPERIENCE	EXPERIENCE	ANSWER		0.6282	10	9	12	0	2
+q025	synonym	experience	true	EXPERIENCE	EXPERIENCE	ANSWER		0.6359	7	7	7	0	4
+q027	synonym	experience	true	EXPERIENCE	EXPERIENCE	ANSWER		0.5844	4	4	6	0	2
+q029	synonym	experience	true	EXPERIENCE	EXPERIENCE	ANSWER		0.6465	9	9	11	0	4
+q030	synonym	experience	true	EXPERIENCE	EXPERIENCE	ANSWER		0.5852	3	3	5	0	3
+q031	synonym	experience	true	EXPERIENCE	EXPERIENCE	ANSWER		0.7417	9	7	10	0	4
+q033	synonym	experience	true	EXPERIENCE	EXPERIENCE	ANSWER		0.5898	10	10	13	0	4
+q036	mixed	experience	true	EXPERIENCE	EXPERIENCE	ANSWER		0.7162	8	8	8	0	3
+q037	mixed	experience	true	EXPERIENCE	EXPERIENCE	ANSWER		0.6193	6	6	9	1	4
+q039	mixed	experience	true	EXPERIENCE	EXPERIENCE	ANSWER		0.6559	10	10	10	0	3
+q040	mixed	experience	true	EXPERIENCE	EXPERIENCE	ANSWER		0.5621	8	7	11	0	4
+q042	mixed	experience	true	EXPERIENCE	EXPERIENCE	ANSWER		0.6239	7	5	10	1	3
+q047	resonance	resonance	true	RESONANCE	RESONANCE	RESONANCE							
+q048	resonance	resonance	true	RESONANCE	RESONANCE	RESONANCE							
+q049	resonance	resonance	true	RESONANCE	RESONANCE	RESONANCE							
+q050	resonance	resonance	true	RESONANCE	RESONANCE	RESONANCE							
+q054	resonance	resonance	true	RESONANCE	RESONANCE	RESONANCE							
+q057	resonance	resonance	true	RESONANCE	RESONANCE	RESONANCE							
+q058	resonance	resonance	true	RESONANCE	RESONANCE	RESONANCE							
+q059	resonance	resonance	true	RESONANCE	RESONANCE	RESONANCE							
+q061	resonance	resonance	true	RESONANCE	RESONANCE	RESONANCE							
+q063	resonance	resonance	true	RESONANCE	RESONANCE	RESONANCE							
+q066	resonance	resonance	true	RESONANCE	RESONANCE	RESONANCE							
+q067	resonance	resonance	true	RESONANCE	RESONANCE	RESONANCE							
+q069	resonance	resonance	true	RESONANCE	RESONANCE	RESONANCE							
+q071	no_answer		false	EXPERIENCE	EXPERIENCE	NO_ANSWER	LOW_SCORE	0.2799					
+q072	no_answer		false	EXPERIENCE	EXPERIENCE	NO_ANSWER	MODEL	0.4170					
+q073	no_answer		false	EXPERIENCE	EXPERIENCE	NO_ANSWER	LOW_SCORE	0.3340					
+q076	no_answer		false	EXPERIENCE	EXPERIENCE	NO_ANSWER	LOW_SCORE	0.3445					
+q078	no_answer		false	EXPERIENCE	EXPERIENCE	NO_ANSWER	LOW_SCORE	0.2934					

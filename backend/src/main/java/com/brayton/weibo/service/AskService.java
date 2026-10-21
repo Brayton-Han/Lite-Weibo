@@ -97,6 +97,19 @@ public class AskService {
     }
 
     public AskResponse ask(String query, Long selfId) {
+        return trace(query, selfId).response();
+    }
+
+    /**
+     * 与 {@link #ask} 同一条路径，额外带出中间结果给评测用：生成层评测的 judge 要看到送进模型的帖子，
+     * 意图与拒答指标要看到分类结果和 top-1。线上只用 {@link #ask}。
+     *
+     * @param top1 向量 top-1 余弦；没走检索（RISK / RESONANCE）时为 NaN
+     * @param docs 送进生成层的帖子；没调生成时为空
+     */
+    public record Trace(QueryIntent intent, double top1, List<SourceDoc> docs, AskResponse response) {}
+
+    public Trace trace(String query, Long selfId) {
         String q = query == null ? "" : query.strip();
         if (q.isEmpty() || q.length() > PostService.SEMANTIC_QUERY_MAX_LENGTH) {
             throw new WeiboException(CommonErrorCode.SEARCH_QUERY_INVALID);
@@ -111,24 +124,25 @@ public class AskService {
         }
 
         return switch (intent) {
-            case RISK -> AskResponse.builder().mode(Mode.RISK).message(RISK_MESSAGE).helplines(HELPLINES).build();
-            case RESONANCE -> AskResponse.builder().mode(Mode.RESONANCE)
-                    .posts(postService.getSemanticSearchResults(q, topK, selfId)).build();
+            case RISK -> new Trace(intent, Double.NaN, List.of(),
+                    AskResponse.builder().mode(Mode.RISK).message(RISK_MESSAGE).helplines(HELPLINES).build());
+            case RESONANCE -> new Trace(intent, Double.NaN, List.of(), AskResponse.builder().mode(Mode.RESONANCE)
+                    .posts(postService.getSemanticSearchResults(q, topK, selfId)).build());
             case EXPERIENCE -> answer(q);
         };
     }
 
-    private AskResponse answer(String q) {
+    private Trace answer(String q) {
         List<ScoredPost> hits = retrieve(q);
         double top1 = hits.isEmpty() ? Double.NEGATIVE_INFINITY : hits.get(0).score();
         if (top1 < minTop1Score) {
             log.info("拒答 reason=LOW_SCORE top1={} 阈值={}", top1, minTop1Score);
-            return noAnswer(Refusal.LOW_SCORE);
+            return new Trace(QueryIntent.EXPERIENCE, top1, List.of(), noAnswer(Refusal.LOW_SCORE));
         }
 
         List<SourceDoc> docs = docLoader.load(hits);
         if (docs.isEmpty()) {
-            return noAnswer(Refusal.NO_DOCS);
+            return new Trace(QueryIntent.EXPERIENCE, top1, docs, noAnswer(Refusal.NO_DOCS));
         }
 
         AnswerGenerator.GeneratedAnswer generated;
@@ -144,13 +158,13 @@ public class AskService {
             log.warn("输出过滤：回答含 system prompt 片段，已拦截 id={} posts={} 回答={}",
                     generated.raw() == null ? "-" : generated.raw().id(),
                     docs.stream().map(SourceDoc::postId).toList(), answer.text());
-            return noAnswer(Refusal.FILTERED);
+            return new Trace(QueryIntent.EXPERIENCE, top1, docs, noAnswer(Refusal.FILTERED));
         }
         if (!answer.hasCitations()) {
             log.info("拒答 reason=MODEL top1={} 回答={}", top1, answer.text());
-            return noAnswer(Refusal.MODEL);
+            return new Trace(QueryIntent.EXPERIENCE, top1, docs, noAnswer(Refusal.MODEL));
         }
-        return AskResponse.builder().mode(Mode.ANSWER).answer(answer).build();
+        return new Trace(QueryIntent.EXPERIENCE, top1, docs, AskResponse.builder().mode(Mode.ANSWER).answer(answer).build());
     }
 
     /** 与 Day 14 阈值校准同一条检索：voyage-4 向量、PUBLIC 帖子、按余弦从高到低 */
