@@ -151,7 +151,7 @@ IR 中未判定文档按不相关处理，但**该假设成立的前提是 pooli
 
 | 项 | 值 |
 |---|---|
-| 来源 | https://lwc.daanvanesch.nl/openaccess.php |
+| 来源 | https://lwc.daanvanesch.nl/openaccess.php（2026-11 已迁移至 https://leidenweibocorpus.nl/openaccess，直链 `/downloads/LWC-messages.zip`） |
 | 许可 | CC BY-NC-SA 3.0（页面原文："These files are under the CC BY-NC-SA 3.0 license"） |
 | 采集时间 | 2012 年 1 月 |
 | 获取 | `download.php?file=messages` → 302 到 S3，约 978 MB zip |

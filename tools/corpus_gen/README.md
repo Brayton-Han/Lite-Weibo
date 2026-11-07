@@ -3,6 +3,22 @@
 docs/CORPUS_DESIGN.md **Step 2** 的实现：生成 2100 条靶区语料（经验类 900 + 共鸣类 1200）。
 噪声层 900 条不走这里，来自 Leiden Weibo Corpus（见 docs/CORPUS_DESIGN.md §5）。
 
+## LWC 原始语料（本地不保留，用时重新下载）
+
+| 项 | 值 |
+|---|---|
+| 页面 | https://leidenweibocorpus.nl/openaccess（旧域名 lwc.daanvanesch.nl 已 301 到这里） |
+| 直链 | https://leidenweibocorpus.nl/downloads/LWC-messages.zip（978,142,660 字节，2026-11-07 验证可下载） |
+| 许可 | CC BY-NC-SA 3.0 |
+| 解压后 | `parsed_messages.sql`（1.8 KB，仅表结构）+ `parsed_messages.txt`（2.3 GB，数据） |
+| 放置位置 | 仓库根 `LWC-messages/`（已在 `.gitignore`） |
+
+```bash
+mkdir -p LWC-messages && cd LWC-messages
+curl -L -o LWC-messages.zip https://leidenweibocorpus.nl/downloads/LWC-messages.zip
+unzip LWC-messages.zip && rm LWC-messages.zip   # 若解出一层子目录，把两个文件挪到 LWC-messages/ 下
+```
+
 ## 文件
 
 | 文件 | 作用 |

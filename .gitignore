@@ -7,7 +7,8 @@ __pycache__/
 # corpus/ 只公开 manifest.jsonl：经验类 + 共鸣类共 2100 条，全部为合成 / 人工补写，不含第三方文本。
 # 其余不进仓库：noise*.jsonl 是 LWC 派生文本（CC BY-NC-SA 3.0，与本仓库的 MIT 冲突，且是真实用户帖子）；
 # style_samples.txt 是真实微博；其余 manifest_* 与 .batch_state.json 是合成过程的中间产物。
-# LWC-messages/ 是 2.3GB 原始语料。噪声层的重建方式见 tools/corpus_gen/README.md。
+# LWC-messages/ 是 2.3GB 原始语料，下载自 https://leidenweibocorpus.nl/downloads/LWC-messages.zip
+# （原 lwc.daanvanesch.nl，已迁移）。下载与噪声层重建方式见 tools/corpus_gen/README.md。
 corpus/*
 !corpus/manifest.jsonl
 LWC-messages/
