@@ -28,7 +28,9 @@ public enum CommonErrorCode implements ErrorCode {
     ASK_UNAVAILABLE(1802, "AI answer is temporarily unavailable, please retry"),
     RATE_LIMITED(1803, "too many requests, please retry later"),
 
+    UNAUTHORIZED(2000, "authentication required"),
     TOKEN_EXPIRED(2001, "Token expired"),
+    TOKEN_INVALID(2002, "invalid token"),
 
     VALIDATION_FAILED(4001, "validation failed"),
     FILE_LIST_NULL(4002, "file list is null"),
