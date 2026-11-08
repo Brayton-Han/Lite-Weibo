@@ -8,6 +8,7 @@ import jakarta.persistence.*;
 import lombok.Data;
 
 import java.time.LocalDateTime;
+import java.util.UUID;
 
 @Entity
 @Data
@@ -31,6 +32,9 @@ public class Notification {
 
     private LocalDateTime createdAt;
 
+    /** 来源事件 id，唯一约束，用于消费端幂等 */
+    private UUID eventId;
+
     // ---- 工厂方法（推荐） ----
     public static Notification follow(FollowEvent e) {
         Notification n = new Notification();
@@ -38,6 +42,7 @@ public class Notification {
         n.targetId = e.getFollowingId();
         n.type = EventType.FOLLOW;
         n.createdAt = e.getTimestamp();
+        n.eventId = e.getEventId();
         return n;
     }
 
@@ -48,6 +53,7 @@ public class Notification {
         n.type = EventType.LIKE;
         n.postId = e.getPostId();
         n.createdAt = e.getTimestamp();
+        n.eventId = e.getEventId();
         return n;
     }
 
@@ -59,6 +65,7 @@ public class Notification {
         n.postId = e.getPostId();
         n.content = e.getContent();
         n.createdAt = e.getTimestamp();
+        n.eventId = e.getEventId();
         return n;
     }
 }
