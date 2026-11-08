@@ -274,17 +274,11 @@ public class PostService {
 
     public List<PostResponse> getFollowingPosts(Long userId) {
 
-        // 抽样范围：收件箱 + 关注的大 V 的发件箱
-        List<String> keys = new ArrayList<>();
-        keys.add("feed:" + userId);
-        for (Long authorId : followRepository.findPullFollowingIds(userId)) {
-            keys.add("outbox:" + authorId);
-        }
-
-        // Step 1: Redis 随机抽样
+        // Step 1: 随机抽样，范围是收件箱 + 关注的大 V 的发件箱（发件箱走本地副本）
         int size = 20;
         int sampleCount = size * 3;
-        List<Long> ids = redisService.getRandomZSetMembers(keys, sampleCount);
+        List<Long> ids = redisService.getRandomFeedSample(
+                userId, followRepository.findPullFollowingIds(userId), sampleCount);
         if (ids.isEmpty()) return Collections.emptyList();
 
         // Step 2: 批量取快照（缓存未命中才查 DB）。抽样可能重复，这里按 id 去重
