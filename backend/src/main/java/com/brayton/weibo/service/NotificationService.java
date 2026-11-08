@@ -47,8 +47,9 @@ public class NotificationService {
         log.debug("收到通知 type={}", message.getType());
 
         Notification n = Notification.follow(message);
-        notificationRepository.save(n);
-        wsPusher.notifyUserFollow(message.getFollowingId(), n);
+        if (saveOnce(n)) {
+            wsPusher.notifyUserFollow(message.getFollowingId(), n);
+        }
     }
 
     @RabbitListener(queues = RabbitConfig.LIKE_QUEUE)
@@ -56,8 +57,9 @@ public class NotificationService {
         log.debug("收到通知 type={}", message.getType());
 
         Notification n = Notification.like(message);
-        notificationRepository.save(n);
-        wsPusher.notifyUserLike(message.getToUserId(), n);
+        if (saveOnce(n)) {
+            wsPusher.notifyUserLike(message.getToUserId(), n);
+        }
     }
 
     @RabbitListener(queues = RabbitConfig.COMMENT_QUEUE)
@@ -65,8 +67,23 @@ public class NotificationService {
         log.debug("收到通知 type={}", message.getType());
 
         Notification n = Notification.comment(message);
-        notificationRepository.save(n);
-        wsPusher.notifyUserComment(message.getToUserId(), n);
+        if (saveOnce(n)) {
+            wsPusher.notifyUserComment(message.getToUserId(), n);
+        }
+    }
+
+    /**
+     * 幂等落库：RabbitMQ 是至少一次投递，监听方法抛异常重新入队、ack 前连接断开都会让
+     * 同一条消息再来一次。按 eventId 去重，重复消息既不落第二条通知，也不再推送。
+     * 推送失败抛异常时消息会重投，此时通知已落库，重投只会被跳过 —— 推送是尽力而为，
+     * 用户刷新列表仍能看到这条通知。
+     */
+    private boolean saveOnce(Notification n) {
+        if (notificationRepository.insertIgnoreDuplicate(n) == 0) {
+            log.info("重复投递的通知已忽略 type={} eventId={}", n.getType(), n.getEventId());
+            return false;
+        }
+        return true;
     }
 
     public UnreadCountResponse getUnreadCounts(Long userId) {
