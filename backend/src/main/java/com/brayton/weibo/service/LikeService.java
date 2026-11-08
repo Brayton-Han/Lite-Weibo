@@ -60,9 +60,8 @@ public class LikeService {
     @Transactional
     public void unlikePost(Long userId, Long postId) {
 
-        if (!likeRepository.existsByUserIdAndPostId(userId, postId)) return;
-
-        likeRepository.deleteByUserIdAndPostId(userId, postId);
+        // 以 DELETE 的影响行数为准，而不是先 exists 再删：并发取消时两边都会通过 exists，计数会被多扣一次
+        if (likeRepository.deleteByUserIdAndPostId(userId, postId) == 0) return;
 
         likeCountService.adjust(postId, -1);
 
