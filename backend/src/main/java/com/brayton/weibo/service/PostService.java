@@ -295,15 +295,23 @@ public class PostService {
                 .toList();
         if (posts.isEmpty()) return Collections.emptyList();
 
-        // Step 3: 可见性过滤
-        List<PostResponse> visiblePosts = new ArrayList<>();
-        for (PostSnapshot p : posts) {
-            Long authorId = p.author().id();
+        // Step 3: 可见性过滤。关注关系按作者批量查，避免每条帖子两次 exists 查询
+        List<PostSnapshot> others = posts.stream()
+                .filter(p -> !p.author().id().equals(userId))
+                .toList();
+        if (others.isEmpty()) return Collections.emptyList();
 
-            boolean self = authorId.equals(userId);
-            if (self) continue;
-            boolean following = followRepository.existsByFollowerIdAndFollowingId(userId, authorId);
-            boolean followed = followRepository.existsByFollowerIdAndFollowingId(authorId, userId);
+        Set<Long> authorIds = others.stream()
+                .map(p -> p.author().id())
+                .collect(Collectors.toSet());
+        Set<Long> followingIds = followRepository.findFollowingIds(userId, authorIds);
+        Set<Long> followedByIds = followRepository.findFollowedByIds(userId, authorIds);
+
+        List<PostResponse> visiblePosts = new ArrayList<>();
+        for (PostSnapshot p : others) {
+            Long authorId = p.author().id();
+            boolean following = followingIds.contains(authorId);
+            boolean followed = followedByIds.contains(authorId);
 
             if (isVisibleInFeed(p.visibility(), false, following, followed)) {
                 visiblePosts.add(buildPostResponse(p, batch, true, followed));

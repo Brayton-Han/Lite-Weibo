@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -23,6 +24,10 @@ public interface PostRepository extends JpaRepository<Post, Long> {
     List<Post> findByIdInWithUser(@Param("ids") Collection<Long> ids);
 
     int countPostsByUserId(long userId);
+
+    @Query("select p.id from Post p where p.user.id = :authorId and p.createdAt >= :since")
+    List<Long> findIdsByAuthorSince(@Param("authorId") long authorId,
+                                    @Param("since") LocalDateTime since);
 
     @Query("""
     SELECT p FROM Post p
