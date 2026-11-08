@@ -7,6 +7,7 @@ import com.brayton.weibo.entity.User;
 import com.brayton.weibo.enums.PostVisibility;
 import com.brayton.weibo.event.FollowEvent;
 import com.brayton.weibo.event.PostFanOutEvent;
+import com.brayton.weibo.event.UnfollowEvent;
 import com.brayton.weibo.repository.FollowRepository;
 import com.brayton.weibo.repository.PostRepository;
 import com.brayton.weibo.repository.UserRepository;
@@ -174,6 +175,30 @@ public class FeedWriteService {
             redisService.addToFeed(followerId, post.getId(), TimeUtil.toTs(post.getCreatedAt()));
         }
         redisService.trimFeed(followerId, FEED_MAX_SIZE);
+    }
+
+    /**
+     * 取关提交后，把被取关者的帖子从取关者的收件箱里删掉，免得残留条目挤占分页和随机抽样名额。
+     *
+     * 只需查收件箱时间窗口内的帖子：收件箱按 score 截断到 FEED_MAX_SIZE，比最旧条目更早的帖子不可能还在里面。
+     * 拉模式的大 V 也照样清理：好友可见帖仍会推进互关好友的收件箱。
+     *
+     * 与重新关注的竞态：两个监听器在同一线程池里乱序执行，若"取关→再关注"很快发生，
+     * 关注预热可能先跑完，这里再把预热的帖子删掉。所以执行前重新确认关系，已恢复关注就跳过。
+     * 反过来，清理之后才完成的扇出仍可能写入残留条目，由读路径 isVisibleInFeed 兜底。
+     */
+    @Async(AsyncConfig.FEED_EXECUTOR)
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
+    public void onUnfollow(UnfollowEvent e) {
+        long followerId = e.followerId();
+        long followingId = e.followingId();
+        if (followRepository.existsByFollowerIdAndFollowingId(followerId, followingId)) return;
+
+        Long oldest = redisService.getFeedOldestTimestamp(followerId);
+        if (oldest == null) return;
+
+        List<Long> postIds = postRepository.findIdsByAuthorSince(followingId, TimeUtil.fromTs(oldest));
+        redisService.removeFromFeed(followerId, postIds);
     }
 
     /** 点赞后写入 liked: 索引。 */

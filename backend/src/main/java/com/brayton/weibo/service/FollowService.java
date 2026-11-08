@@ -9,6 +9,7 @@ import com.brayton.weibo.error.CommonErrorCode;
 import com.brayton.weibo.error.ErrorCode;
 import com.brayton.weibo.error.WeiboException;
 import com.brayton.weibo.event.FollowEvent;
+import com.brayton.weibo.event.UnfollowEvent;
 import com.brayton.weibo.repository.FollowRepository;
 import com.brayton.weibo.repository.PostRepository;
 import com.brayton.weibo.repository.UserRepository;
@@ -59,6 +60,9 @@ public class FollowService {
         followRepository.deleteByFollowerIdAndFollowingId(followerId, followingId);
         userRepository.decrementFollowerCountById(followingId);
         userRepository.decrementFollowCountById(followerId);
+
+        // 收件箱清理在事务提交后异步执行；清理前读路径靠 isVisibleInFeed 兜底过滤
+        publisher.publishEvent(new UnfollowEvent(followerId, followingId));
     }
 
     public List<UserResponse> getFollowers(Long id, Long lastId, int size) {

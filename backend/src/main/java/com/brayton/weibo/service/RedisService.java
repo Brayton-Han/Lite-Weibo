@@ -27,6 +27,20 @@ public class RedisService {
         redis.opsForZSet().remove(key, postId);
     }
 
+    public void removeFromFeed(Long userId, Collection<Long> postIds) {
+        if (postIds.isEmpty()) return;
+        redis.opsForZSet().remove("feed:" + userId, postIds.toArray());
+    }
+
+    /** 收件箱里最旧一条的 score（毫秒时间戳）；收件箱为空时返回 null */
+    public Long getFeedOldestTimestamp(Long userId) {
+        Set<ZSetOperations.TypedTuple<Object>> oldest =
+                redis.opsForZSet().rangeWithScores("feed:" + userId, 0, 0);
+        if (oldest == null || oldest.isEmpty()) return null;
+        Double score = oldest.iterator().next().getScore();
+        return score == null ? null : score.longValue();
+    }
+
     public void trimFeed(long userId, int maxSize) {
         String key = "feed:" + userId;
         redis.opsForZSet().removeRange(key, 0, -maxSize - 1);
