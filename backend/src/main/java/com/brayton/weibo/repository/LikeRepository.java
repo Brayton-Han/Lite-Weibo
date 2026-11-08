@@ -10,6 +10,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -26,6 +27,20 @@ public interface LikeRepository extends JpaRepository<Like, Long> {
     Set<Long> findLikedPostIds(Long userId, Collection<Long> postIds);
 
     Optional<Like> findByUserIdAndPostId(Long userId, Long postId);
+
+    /**
+     * 点赞，返回实际插入的行数（已赞过返回 0）。
+     * 并发重复点赞时，第二条 INSERT 等第一条提交后撞上唯一约束，ON CONFLICT 让它静默返回 0，
+     * 而不是抛 DataIntegrityViolationException 把整个事务回滚、接口报 500。
+     * 冲突目标按列写而不按约束名：早期由 Hibernate 建表的库里，唯一约束是自动生成的名字。
+     */
+    @Modifying
+    @Query(value = """
+            INSERT INTO likes (user_id, post_id, created_at) VALUES (:userId, :postId, :createdAt)
+            ON CONFLICT (user_id, post_id) DO NOTHING
+            """, nativeQuery = true)
+    int insertIgnoreDuplicate(@Param("userId") Long userId, @Param("postId") Long postId,
+                              @Param("createdAt") LocalDateTime createdAt);
 
     // 用户是否点赞了某帖子
     boolean existsByUserIdAndPostId(Long userId, Long postId);
