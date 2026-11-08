@@ -16,6 +16,8 @@ import org.springframework.data.redis.core.script.RedisScript;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
@@ -70,6 +72,45 @@ class PostCacheServiceTest {
                 .thenThrow(new QueryTimeoutException("redis down"));
         when(postRepository.findByIdInWithUser(List.of(1L))).thenReturn(List.of(post(1, 0)));
 
+        assertThat(cache.getPosts(List.of(1L))).containsKey(1L);
+    }
+
+    @Test
+    void concurrentMissesOnSameIdLoadOnlyOnce() throws Exception {
+        CountDownLatch release = new CountDownLatch(1);
+        when(postRepository.findByIdInWithUser(anyList())).thenAnswer(inv -> {
+            assertThat(release.await(5, TimeUnit.SECONDS)).isTrue();
+            return List.of(post(1, 0));
+        });
+
+        Thread first = new Thread(() -> cache.getPosts(List.of(1L)));
+        first.start();
+        verify(postRepository, timeout(5000)).findByIdInWithUser(anyList());
+
+        // 第一个线程卡在查库时，第二个线程来取同一个 id，应等待同一个加载而不是自己回源
+        Map<Long, PostSnapshot>[] second = new Map[1];
+        Thread t2 = new Thread(() -> second[0] = cache.getPosts(List.of(1L)));
+        t2.start();
+        long deadline = System.currentTimeMillis() + 5000;
+        while (t2.getState() != Thread.State.WAITING && System.currentTimeMillis() < deadline) Thread.onSpinWait();
+        assertThat(t2.getState()).isEqualTo(Thread.State.WAITING);
+
+        release.countDown();
+        first.join(5000);
+        t2.join(5000);
+
+        assertThat(second[0]).containsKey(1L);
+        verify(postRepository, times(1)).findByIdInWithUser(anyList());
+    }
+
+    @Test
+    void failedLoadIsNotCachedAndPropagates() {
+        when(postRepository.findByIdInWithUser(anyList()))
+                .thenThrow(new QueryTimeoutException("db down"))
+                .thenReturn(List.of(post(1, 0)));
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> cache.getPosts(List.of(1L)))
+                .isInstanceOf(QueryTimeoutException.class);
         assertThat(cache.getPosts(List.of(1L))).containsKey(1L);
     }
 

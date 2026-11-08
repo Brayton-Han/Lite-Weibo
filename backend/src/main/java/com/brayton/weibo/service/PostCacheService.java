@@ -10,7 +10,7 @@ import com.brayton.weibo.enums.PostVisibility;
 import com.brayton.weibo.repository.PostRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.AsyncCache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
@@ -26,6 +26,7 @@ import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadLocalRandom;
@@ -48,6 +49,8 @@ import java.util.concurrent.TimeUnit;
  * 别的实例的本地缓存在编辑/删除后也最多旧这么久。
  *
  * 防护：查不到的 id 写空值标记（防穿透）；Redis TTL 加随机偏移（防集中过期）；
+ * 本地缓存是 AsyncCache，同一实例上对同一 id 的并发未命中共享同一个加载中的 future，
+ * 热帖 Redis key 过期时每个实例只回源一次（防击穿，跨实例不加锁，最多"实例数"次查库）；
  * Redis 读写失败一律降级为直接查库，不影响请求。
  */
 @Slf4j
@@ -134,10 +137,12 @@ public class PostCacheService {
     private final ObjectMapper mapper;
 
     /** value 为 Optional.empty() 表示已确认不存在（本地的空值标记） */
-    private final Cache<Long, Optional<PostSnapshot>> local = Caffeine.newBuilder()
+    private final AsyncCache<Long, Optional<PostSnapshot>> local = Caffeine.newBuilder()
+            // 在调用线程上加载：回源可能查库，留在调用方的线程里才能沿用它的事务/连接上下文，也不占公共 ForkJoinPool
+            .executor(Runnable::run)
             .maximumSize(10_000)
             .expireAfterWrite(LOCAL_TTL)
-            .build();
+            .buildAsync();
 
     private final ScheduledExecutorService delayedEvictor = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r, "post-cache-evict");
@@ -167,35 +172,39 @@ public class PostCacheService {
         Map<Long, PostSnapshot> result = new HashMap<>();
         if (ids == null || ids.isEmpty()) return result;
 
-        // 1. 本地
-        List<Long> afterLocal = new ArrayList<>();
-        for (Long id : new LinkedHashSet<>(ids)) {
-            Optional<PostSnapshot> cached = local.getIfPresent(id);
-            if (cached == null) afterLocal.add(id);
-            else cached.ifPresent(s -> result.put(id, s));
+        // 1. 本地；未命中的 id 先占位一个加载中的 future，其他线程再来同一 id 时等这个 future，不重复回源
+        Map<Long, Optional<PostSnapshot>> snapshots;
+        try {
+            snapshots = local.getAll(ids, this::loadMisses).join();
+        } catch (CompletionException e) {
+            // 加载失败的 future 会被 Caffeine 移出缓存，下次请求重新回源
+            if (e.getCause() instanceof RuntimeException re) throw re;
+            throw e;
         }
-        if (afterLocal.isEmpty()) return result;
+        snapshots.forEach((id, s) -> s.ifPresent(v -> result.put(id, v)));
+        return result;
+    }
+
+    /** 本地未命中的一批 id：2. Redis → 3. DB，回填 Redis；查不到的写空值标记。每个 id 都有返回值 */
+    private Map<Long, Optional<PostSnapshot>> loadMisses(Set<? extends Long> ids) {
+        Map<Long, Optional<PostSnapshot>> result = new HashMap<>();
 
         // 2. Redis
-        List<Long> afterRedis = readRedis(afterLocal, result);
+        List<Long> afterRedis = readRedis(new ArrayList<>(ids), result);
         if (afterRedis.isEmpty()) return result;
 
-        // 3. DB，回填两级缓存；查不到的写空值标记
+        // 3. DB
         Map<Long, PostSnapshot> loaded = new HashMap<>();
         for (Post p : postRepository.findByIdInWithUser(afterRedis)) {
             loaded.put(p.getId(), PostSnapshot.from(p));
         }
         writeRedis(afterRedis, loaded);
-        for (Long id : afterRedis) {
-            PostSnapshot s = loaded.get(id);
-            local.put(id, Optional.ofNullable(s));
-            if (s != null) result.put(id, s);
-        }
+        for (Long id : afterRedis) result.put(id, Optional.ofNullable(loaded.get(id)));
         return result;
     }
 
-    /** 读 Redis，命中的放进 result 和本地缓存，返回仍未命中的 id */
-    private List<Long> readRedis(List<Long> ids, Map<Long, PostSnapshot> result) {
+    /** 读 Redis，命中的（含空值标记）放进 result，返回仍未命中的 id */
+    private List<Long> readRedis(List<Long> ids, Map<Long, Optional<PostSnapshot>> result) {
         List<Object> rows;
         try {
             rows = redis.executePipelined(new SessionCallback<Object>() {
@@ -219,8 +228,7 @@ public class PostCacheService {
             if (hit == null) {
                 misses.add(id);
             } else {
-                local.put(id, hit);
-                hit.ifPresent(s -> result.put(id, s));
+                result.put(id, hit);
             }
         }
         return misses;
@@ -300,7 +308,8 @@ public class PostCacheService {
     }
 
     private void evictNow(Long postId) {
-        local.invalidate(postId);
+        // 若该 id 正在加载，Caffeine 会丢弃加载结果而不写回本地；已在等这个 future 的请求仍拿到加载值
+        local.synchronous().invalidate(postId);
         try {
             redis.delete(key(postId));
         } catch (DataAccessException e) {
