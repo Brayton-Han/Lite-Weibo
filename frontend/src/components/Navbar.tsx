@@ -117,15 +117,16 @@ export default function Navbar() {
   }, [me]); 
 
   // --- Search Handlers ---
-  useEffect(() => {
-    if (pathname === '/search') {
-      const q = searchParams.get('q');
-      if (q) {
-        setSearchQuery(q);
-        setIsSearchOpen(true);
-      }
+  // URL 中的 q 变化时同步到搜索框（渲染期调整 state，避免 effect 内同步 setState）
+  const urlQuery = pathname === '/search' ? searchParams.get('q') : null;
+  const [syncedUrlQuery, setSyncedUrlQuery] = useState<string | null>(null);
+  if (urlQuery !== syncedUrlQuery) {
+    setSyncedUrlQuery(urlQuery);
+    if (urlQuery) {
+      setSearchQuery(urlQuery);
+      setIsSearchOpen(true);
     }
-  }, [pathname, searchParams]);
+  }
 
   const handleSearchSubmit = (e?: React.FormEvent) => {
     e?.preventDefault();

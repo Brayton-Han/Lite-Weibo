@@ -313,9 +313,9 @@ export default function UserProfileClient({ viewedUserId, activeTab }: UserProfi
             toast.error(updateRes.data.message || "Failed to update profile");
         }
 
-    } catch (error: any) {
+    } catch (error) {
         console.error(error);
-        toast.error(error.message || "Something went wrong");
+        toast.error((error as Error).message || "Something went wrong");
     } finally {
         setIsUploadingAvatar(false);
         if (avatarInputRef.current) avatarInputRef.current.value = '';
@@ -340,7 +340,7 @@ export default function UserProfileClient({ viewedUserId, activeTab }: UserProfi
       const res = isFollowing ? await api.delete(url) : await api.post(url);
       if (res.data.code === 0) {
         toast.success(isFollowing ? 'Unfollowed' : 'Followed');
-        var friendChange = 0;
+        let friendChange = 0;
         if (isFollowing && isFollowed) friendChange = -1;
         else if (!isFollowing && isFollowed) friendChange = 1;
         setViewedUser(prev => {

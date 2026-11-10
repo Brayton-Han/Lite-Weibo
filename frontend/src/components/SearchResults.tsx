@@ -174,7 +174,7 @@ export default function SearchResults() {
           {/* 搜索结果标题栏 */}
           <div className="mb-6 flex items-center gap-2 text-xl font-bold text-gray-800 px-1">
             <SearchIcon className="text-gray-400" />
-            Results for "{query}"
+            Results for &ldquo;{query}&rdquo;
           </div>
 
           <AskPanel state={ask} currentUserId={currentUserId} hasKeywordResults={showPosts && posts.length > 0} />
