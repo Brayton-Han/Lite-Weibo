@@ -1,8 +1,10 @@
 # 所有密钥从根目录 .env 读取（cp .env.example .env 后填写），不写进本文件。
 # 标了 :? 的变量是必填项，缺失时 docker compose 直接报错，不会用空值启动。
 #
-# 端口：数据库 / Redis / RabbitMQ 只绑 127.0.0.1，供本机 ./mvnw spring-boot:run 和调试工具使用，
-# 外网不可达。容器之间走 compose 内网，不依赖这些映射。
+# 端口：除 caddy 外所有端口只绑 127.0.0.1，外网不可达。容器之间走 compose 内网，不依赖这些映射。
+#   - 本地开发：docker compose up -d，浏览器直接访问 localhost:3000 / localhost:8080
+#   - 生产：docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d，
+#     额外启动 caddy（80/443，自动 HTTPS），外部流量只经 caddy 进入；见 docker-compose.prod.yml
 #
 # 编排：数据层都有 healthcheck，backend 等三者 healthy 后才启动；所有服务 restart: unless-stopped；
 # 每个服务设内存上限（deploy.resources.limits，docker compose v2 非 swarm 模式也生效），
@@ -102,7 +104,7 @@ services:
         limits:
           memory: 1g
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
       # Actuator（/actuator/metrics、/actuator/prometheus），只绑本机回环，不对外
       - "127.0.0.1:8081:8081"
     # 环境变量优先级高于打进 jar 的 application.yml，容器内一律以这里为准
@@ -131,6 +133,8 @@ services:
       R2_SECRETKEY: ${R2_SECRET_KEY:?请在 .env 中设置 R2_SECRET_KEY}
       R2_BUCKET: ${R2_BUCKET:-weibo-images}
       R2_PUBLICBASEURL: ${R2_PUBLIC_BASE_URL:?请在 .env 中设置 R2_PUBLIC_BASE_URL}
+      # 允许的前端 origin（REST CORS 与 WebSocket 握手共用），逗号分隔；生产填 https://<APP_DOMAIN>
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
       # 新帖增量向量化用。未设置时发帖照常，只是不生成向量
       VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
       # 站内问答生成层用。未设置时应用照常启动，只是问答调用会失败
@@ -146,7 +150,7 @@ services:
     depends_on:
       - backend
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     <<: *restart
     deploy:
       resources:

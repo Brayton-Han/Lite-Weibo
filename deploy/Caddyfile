@@ -1,0 +1,74 @@
+# 反向代理 + 自动 HTTPS（Let's Encrypt，证书存 caddy_data 卷）。
+# 前端与 API 用两个子域名：后端的 /login、/register、/set 等路径和前端页面路由同名，同域按路径分流会冲突。
+# 域名来自 .env 的 APP_DOMAIN / API_DOMAIN；两者的 DNS A 记录都要指向本机，且 80/443 对外开放。
+# 本地试跑可用 APP_DOMAIN=app.localhost API_DOMAIN=api.localhost，Caddy 会改用内置 CA 签发本地证书。
+
+# 两个站点共用的安全响应头
+(security_headers) {
+	header {
+		# 1 年；确认所有子域都已上 HTTPS 后再考虑 includeSubDomains / preload
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+}
+
+# 访问日志：/ws 的 token 在 query 参数里，写日志前删掉
+(access_log) {
+	log {
+		output stdout
+		format filter {
+			wrap json
+			request>uri query {
+				delete token
+			}
+			# Authorization 头里是 JWT，同样不落日志
+			request>headers>Authorization delete
+		}
+	}
+}
+
+{$APP_DOMAIN} {
+	import security_headers
+	import access_log
+
+	# 基础 CSP：Next.js 注入内联脚本/样式，需 'unsafe-inline'；
+	# 图片来自 R2 公网域名（https:），heic2any 转码用 blob: / worker；
+	# 浏览器直连 API 域名（REST + SSE 走 https，通知走 wss）
+	header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https://{$API_DOMAIN} wss://{$API_DOMAIN}; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+
+	encode zstd gzip
+	reverse_proxy frontend:3000
+}
+
+{$API_DOMAIN} {
+	import security_headers
+	import access_log
+
+	# API 只返回 JSON / SSE，不渲染页面
+	header Content-Security-Policy "default-src 'none'; frame-ancestors 'none'"
+
+	# WebSocket：Caddy 自动透传 Upgrade / Connection 头；代理层对长连接没有空闲读超时，
+	# 不会像 Nginx 默认 60s proxy_read_timeout 那样掐断。Caddy 重载配置时延迟 5s 再关旧连接
+	@ws path /ws /ws/*
+	reverse_proxy @ws backend:8080 {
+		stream_close_delay 5s
+	}
+
+	# SSE 问答：关闭响应缓冲，逐条立即下发；不压缩，避免压缩层攒包
+	@sse path /posts/search/ask/stream
+	reverse_proxy @sse backend:8080 {
+		flush_interval -1
+	}
+
+	# 只压缩 JSON。encode 默认匹配 text/*，会把 text/event-stream 也压缩并攒包
+	encode {
+		gzip
+		match {
+			header Content-Type application/json*
+		}
+	}
+	reverse_proxy backend:8080
+}
