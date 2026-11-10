@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, ChangeEvent } from 'react';
 import { useRouter } from 'next/navigation';
+import { BIO_MAX, USERNAME_MAX, validateUsername } from '@/lib/userRules';
 import api from '@/lib/api';
 import { ApiResponse, User, Gender } from '@/types';
 import { toast } from 'react-hot-toast';
@@ -138,8 +139,13 @@ export default function SettingsPage() {
   // 5. 保存总逻辑
   const handleSave = async () => {
   if (!user) return;
-  if (!formData.username.trim()) {
-      toast.error("Username is required");
+  const usernameError = validateUsername(formData.username);
+  if (usernameError) {
+      toast.error(usernameError);
+      return;
+  }
+  if (formData.bio.length > BIO_MAX) {
+      toast.error(`Bio must be at most ${BIO_MAX} characters`);
       return;
   }
   
@@ -267,6 +273,7 @@ export default function SettingsPage() {
                 type="text" 
                 name="username"
                 value={formData.username} 
+                maxLength={USERNAME_MAX}
                 onChange={handleInputChange} 
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-shadow" 
                 placeholder="Enter your username"
@@ -309,6 +316,7 @@ export default function SettingsPage() {
                 name="bio"
                 rows={4}
                 value={formData.bio} 
+                maxLength={BIO_MAX}
                 onChange={handleInputChange} 
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-shadow resize-none" 
                 placeholder="Tell us a little about yourself..."
