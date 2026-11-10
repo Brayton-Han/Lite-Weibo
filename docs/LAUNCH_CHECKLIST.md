@@ -57,11 +57,14 @@
 
 ### 镜像
 
-- [ ] `backend/Dockerfile` 改为多阶段构建（Maven 构建阶段 + JRE 运行阶段），不依赖宿主机预先 `mvn package`
-- [ ] 后端容器以非 root 用户运行，设置 `-XX:MaxRAMPercentage=75`
-      （`MaxRAMPercentage` 已在 docker-compose.yml 通过 `JAVA_TOOL_OPTIONS` 设置，非 root 未做）
-- [ ] `frontend/Dockerfile` 改用 `npm ci`，多阶段构建，`next.config.ts` 开启 `output: 'standalone'`
-- [ ] 镜像 tag 固定版本：`redis:7` → 具体小版本，`rabbitmq:3-management` 同理
+- [x] `backend/Dockerfile` 改为多阶段构建（Maven 构建阶段 + JRE 运行阶段），不依赖宿主机预先 `mvn package`
+      ——`start.sh` 去掉宿主机打包步骤；`.dockerignore` 排除 `target` 和含密钥的 `application.yml`
+- [x] 后端容器以非 root 用户运行，设置 `-XX:MaxRAMPercentage=75`
+      ——运行用户 `app`；`JAVA_TOOL_OPTIONS` 从 compose 移入 Dockerfile
+- [x] `frontend/Dockerfile` 改用 `npm ci`，多阶段构建，`next.config.ts` 开启 `output: 'standalone'`
+      ——运行阶段以 `node` 用户跑 `server.js`；`.dockerignore` 排除宿主机 `node_modules` / `.next`
+- [x] 镜像 tag 固定版本：`redis:7` → 具体小版本，`rabbitmq:3-management` 同理
+      ——`redis:7.4.12` / `rabbitmq:3.13.7-management` / `pgvector/pgvector:0.8.6-pg15`（与原 tag 实际解析到的版本一致）
 
 ### 网络与域名
 
