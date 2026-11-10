@@ -3,6 +3,13 @@
 #
 # 端口：数据库 / Redis / RabbitMQ 只绑 127.0.0.1，供本机 ./mvnw spring-boot:run 和调试工具使用，
 # 外网不可达。容器之间走 compose 内网，不依赖这些映射。
+#
+# 编排：数据层都有 healthcheck，backend 等三者 healthy 后才启动；所有服务 restart: unless-stopped；
+# 每个服务设内存上限（deploy.resources.limits，docker compose v2 非 swarm 模式也生效），
+# 合计约 3.5G，按主机规格调整。
+
+x-restart: &restart
+  restart: unless-stopped
 
 services:
   postgresql:
@@ -17,6 +24,17 @@ services:
       - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    <<: *restart
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d weibo"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 1g
 
   redis:
     image: redis:7
@@ -24,10 +42,25 @@ services:
     # feed 索引只存在于 Redis，读路径不回源数据库，
     # 因此必须开启 AOF 持久化并挂卷，否则容器重建后 feed 全部变空。
     command: redis-server --appendonly yes --appendfsync everysec --requirepass ${REDIS_PASSWORD:?请在 .env 中设置 REDIS_PASSWORD}
+    environment:
+      # 仅供下面的 healthcheck 里 redis-cli 认证使用（redis-cli 会自动读取 REDISCLI_AUTH）
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?请在 .env 中设置 REDIS_PASSWORD}
     ports:
       - "127.0.0.1:6379:6379"
     volumes:
       - redisdata:/data
+    <<: *restart
+    healthcheck:
+      # 未认证时 redis-cli 也返回 0，所以要匹配 PONG
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          # feed 索引常驻 Redis 且不能被淘汰（默认 noeviction），数据量上来后要调大这个值
+          memory: 512m
 
   rabbitmq:
     image: rabbitmq:3-management
@@ -39,14 +72,34 @@ services:
       - "127.0.0.1:5672:5672"
       # 管理界面；远程服务器上通过 ssh -L 15672:localhost:15672 访问
       - "127.0.0.1:15672:15672"
+    <<: *restart
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          # RabbitMQ 会识别 cgroup 内存上限，按默认 0.4 水位线触发流控
+          memory: 512m
 
   backend:
     build: ./backend
     container_name: backend
     depends_on:
-      - postgresql
-      - redis
-      - rabbitmq
+      postgresql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    <<: *restart
+    deploy:
+      resources:
+        limits:
+          memory: 1g
     ports:
       - "8080:8080"
       # Actuator（/actuator/metrics、/actuator/prometheus），只绑本机回环，不对外
@@ -55,6 +108,8 @@ services:
     environment:
       # 结构化 JSON 日志（Spring Boot 内置 logstash 格式），MDC 里的 traceId / userId 是独立字段
       LOGGING_STRUCTURED_FORMAT_CONSOLE: logstash
+      # JVM 默认堆只占容器内存的 25%，有内存上限后改为 75%
+      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=75
       # 生产不打 SQL：拖慢请求，且会把参数写进日志
       SPRING_JPA_SHOW_SQL: "false"
       # 当日 Claude 花费阈值（美元），到了就关闭 AI 回答、只保留检索
@@ -93,6 +148,11 @@ services:
       - backend
     ports:
       - "3000:3000"
+    <<: *restart
+    deploy:
+      resources:
+        limits:
+          memory: 512m
 
 volumes:
   pgdata:

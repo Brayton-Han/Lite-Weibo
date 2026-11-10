@@ -59,6 +59,7 @@
 
 - [ ] `backend/Dockerfile` 改为多阶段构建（Maven 构建阶段 + JRE 运行阶段），不依赖宿主机预先 `mvn package`
 - [ ] 后端容器以非 root 用户运行，设置 `-XX:MaxRAMPercentage=75`
+      （`MaxRAMPercentage` 已在 docker-compose.yml 通过 `JAVA_TOOL_OPTIONS` 设置，非 root 未做）
 - [ ] `frontend/Dockerfile` 改用 `npm ci`，多阶段构建，`next.config.ts` 开启 `output: 'standalone'`
 - [ ] 镜像 tag 固定版本：`redis:7` → 具体小版本，`rabbitmq:3-management` 同理
 
@@ -72,9 +73,12 @@
 
 ### Compose 编排
 
-- [ ] postgresql / redis / rabbitmq 加 `healthcheck`，backend 用 `depends_on: condition: service_healthy`
-- [ ] 所有服务加 `restart: unless-stopped`
-- [ ] 资源限制（内存上限），避免单个服务拖垮主机
+- [x] postgresql / redis / rabbitmq 加 `healthcheck`，backend 用 `depends_on: condition: service_healthy`
+      ——`pg_isready` / `redis-cli ping`（`REDISCLI_AUTH` 认证，匹配 PONG）/ `rabbitmq-diagnostics ping`
+- [x] 所有服务加 `restart: unless-stopped`
+- [x] 资源限制（内存上限），避免单个服务拖垮主机
+      ——`deploy.resources.limits.memory`：postgres 1g / redis 512m / rabbitmq 512m / backend 1g / frontend 512m；
+      backend 同时设 `JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=75`。Redis 存 feed 且不淘汰，数据量增长后需调大
 
 ### CI
 
