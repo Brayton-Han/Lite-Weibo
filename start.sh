@@ -2,8 +2,8 @@
 
 # Lite-Weibo 一键启动脚本
 # 用法:
-#   ./start.sh              构建后端 jar 并启动全部服务
-#   ./start.sh --skip-build 跳过 Maven 打包，直接用现有 jar 启动
+#   ./start.sh              构建镜像（镜像内编译）并启动全部服务
+#   ./start.sh --skip-build 不重新构建，直接用现有镜像启动
 #   ./start.sh down         停止并移除容器（保留数据库数据）
 #   ./start.sh clean        停止并移除容器 + 删除 pgdata / redisdata 数据卷
 #   ./start.sh logs         跟踪 backend / frontend 日志
@@ -88,24 +88,14 @@ echo "🚀 Lite-Weibo 一键启动"
 echo "=================================="
 echo ""
 
-# backend/Dockerfile 只做 COPY target/*.jar，镜像内不编译，
-# 所以必须先在宿主机打包，否则会把旧 jar 打进镜像。
+# 前后端 Dockerfile 都是多阶段构建，编译在镜像内完成，宿主机不需要 JDK / Node
 if [ "$SKIP_BUILD" = true ]; then
-    if ! ls backend/target/*.jar > /dev/null 2>&1; then
-        echo "❌ backend/target 下没有 jar，无法跳过构建"
-        exit 1
-    fi
-    echo "⏭️  跳过 Maven 打包，使用现有 jar:"
-    ls -1 backend/target/*.jar | sed 's/^/     /'
+    echo "⏭️  跳过构建，使用现有镜像启动..."
+    $COMPOSE up -d
 else
-    echo "📦 正在打包后端 (./mvnw clean package -DskipTests)..."
-    (cd backend && ./mvnw -q clean package -DskipTests)
-    echo "✅ 打包完成: $(ls -1 backend/target/*.jar | head -1)"
+    echo "🐳 正在构建镜像并启动容器（首次构建需下载依赖，较慢）..."
+    $COMPOSE up -d --build
 fi
-
-echo ""
-echo "🐳 正在构建并启动容器..."
-$COMPOSE up -d --build
 
 # 无 actuator，以「端口能返回任意 HTTP 状态码」作为就绪信号
 wait_for() {

@@ -11,9 +11,10 @@
 x-restart: &restart
   restart: unless-stopped
 
+# 镜像 tag 固定到具体版本，避免 pull 时静默升级；升级时显式改这里
 services:
   postgresql:
-    image: pgvector/pgvector:pg15
+    image: pgvector/pgvector:0.8.6-pg15
     container_name: postgresql_weibo
     environment:
       POSTGRES_DB: weibo
@@ -37,7 +38,7 @@ services:
           memory: 1g
 
   redis:
-    image: redis:7
+    image: redis:7.4.12
     container_name: redis_weibo
     # feed 索引只存在于 Redis，读路径不回源数据库，
     # 因此必须开启 AOF 持久化并挂卷，否则容器重建后 feed 全部变空。
@@ -63,7 +64,7 @@ services:
           memory: 512m
 
   rabbitmq:
-    image: rabbitmq:3-management
+    image: rabbitmq:3.13.7-management
     container_name: rabbitmq_weibo
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?请在 .env 中设置 RABBITMQ_USER}
@@ -108,8 +109,6 @@ services:
     environment:
       # 结构化 JSON 日志（Spring Boot 内置 logstash 格式），MDC 里的 traceId / userId 是独立字段
       LOGGING_STRUCTURED_FORMAT_CONSOLE: logstash
-      # JVM 默认堆只占容器内存的 25%，有内存上限后改为 75%
-      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=75
       # 生产不打 SQL：拖慢请求，且会把参数写进日志
       SPRING_JPA_SHOW_SQL: "false"
       # 当日 Claude 花费阈值（美元），到了就关闭 AI 回答、只保留检索

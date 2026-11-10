@@ -1,0 +1,8 @@
+target
+.idea
+*.iml
+.DS_Store
+HELP.md
+demo.html
+# 本地开发配置，含密钥；打包时本来就被 maven-jar-plugin 排除，这里连构建上下文都不进
+src/main/resources/application.yml
