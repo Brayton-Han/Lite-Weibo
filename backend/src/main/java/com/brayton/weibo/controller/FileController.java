@@ -4,7 +4,11 @@ import lombok.extern.slf4j.Slf4j;
 import com.brayton.weibo.dto.ApiResponse;
 import com.brayton.weibo.error.CommonErrorCode;
 import com.brayton.weibo.error.WeiboException;
+import com.brayton.weibo.config.security.CustomUserDetails;
+import com.brayton.weibo.ratelimit.RateLimitPolicies;
+import com.brayton.weibo.ratelimit.RateLimiter;
 import com.brayton.weibo.service.FileService;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -19,16 +23,22 @@ import java.util.List;
 public class FileController {
 
     private final FileService fileService;
+    private final RateLimiter rateLimiter;
+    private final RateLimitPolicies rateLimitPolicies;
 
-    public FileController(FileService fileService) {
+    public FileController(FileService fileService, RateLimiter rateLimiter, RateLimitPolicies rateLimitPolicies) {
         this.fileService = fileService;
+        this.rateLimiter = rateLimiter;
+        this.rateLimitPolicies = rateLimitPolicies;
     }
 
     @PostMapping("/upload")
     public ResponseEntity<ApiResponse<?>> uploadImages(
-            @RequestParam("file") List<MultipartFile> files
+            @RequestParam("file") List<MultipartFile> files,
+            @AuthenticationPrincipal CustomUserDetails self
     ) {
         log.debug("文件上传开始");
+        rateLimiter.check(rateLimitPolicies.upload(), self.getId());
         // 空文件列表（前端会避免，但保险）
         if (files == null || files.isEmpty()) {
             throw new WeiboException(CommonErrorCode.FILE_LIST_NULL);

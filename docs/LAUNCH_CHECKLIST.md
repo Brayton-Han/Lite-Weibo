@@ -28,12 +28,17 @@
 
 ### 文件上传（`common/R2Client.java`、`controller/FileController.java`）
 
-- [ ] Content-Type 白名单：只允许 `image/jpeg`、`image/png`、`image/webp`、`image/gif`
-- [ ] 读文件头魔数校验真实类型，不信任客户端传的 `contentType`
-- [ ] 对象 key 改为 `UUID + 规范扩展名`，不再拼接 `getOriginalFilename()`
-- [ ] 单文件大小上限（如 10MB）在业务层再校验一次
-- [ ] 上传接口加限流（按 userId）
-- [ ] 验收：上传 `.html` / `.svg` / 改名的非图片文件均被拒绝
+- [x] Content-Type 白名单：只允许 `image/jpeg`、`image/png`、`image/webp`、`image/gif`
+      ——另加 `image/heic` / `image/heif`（iPhone 默认格式；前端 heic2any 转 JPEG 失败时原文件上传）。见 `common/ImageType`
+- [x] 读文件头魔数校验真实类型，不信任客户端传的 `contentType`
+      ——读前 12 字节识别；存入 R2 的 Content-Type 取识别结果。HEIC 按 ftyp 品牌区分，MP4 / AVIF 等同容器格式不放行
+- [x] 对象 key 改为 `UUID + 规范扩展名`，不再拼接 `getOriginalFilename()`
+- [x] 单文件大小上限（如 10MB）在业务层再校验一次
+      ——`multipart.max-file-size` 由 20MB 改为 10MB，超限回 413；`FileService` 再校验一次；整批先校验再上传，任一不合格整批拒绝
+- [x] 上传接口加限流（按 userId）
+      ——`RateLimitPolicies.upload`：30 次 / 10 分钟，超限 429
+- [x] 验收：上传 `.html` / `.svg` / 改名的非图片文件均被拒绝
+      ——本地实测三者均返回 4005；11MB 文件 413；第 31 次上传 429
 
 ### 认证与账号（`service/UserService.java`、`dto/RegisterRequest.java`）
 

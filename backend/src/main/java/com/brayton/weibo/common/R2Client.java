@@ -46,14 +46,18 @@ public class R2Client {
                 .build();
     }
 
-    public String upload(MultipartFile file) {
-        String key = UUID.randomUUID().toString() + "-" + file.getOriginalFilename();
+    /**
+     * 上传一张已通过校验的图片。key = UUID + 规范扩展名，不再拼接客户端文件名（路径穿越、超长、特殊字符）；
+     * Content-Type 取魔数识别出的类型，不用客户端传的值（否则可把 HTML 以 text/html 存进公网桶）
+     */
+    public String upload(MultipartFile file, ImageType type) {
+        String key = UUID.randomUUID() + "." + type.extension();
 
         try {
             PutObjectRequest request = PutObjectRequest.builder()
                     .bucket(bucket)
                     .key(key)
-                    .contentType(file.getContentType())
+                    .contentType(type.mimeType())
                     .build();
 
             s3.putObject(request, RequestBody.fromInputStream(file.getInputStream(), file.getSize()));
