@@ -45,7 +45,7 @@ class AskServiceTest {
     private final PostEmbeddingRepository embeddingRepository = mock(PostEmbeddingRepository.class);
     private final SemanticSearchService semanticSearch = mock(SemanticSearchService.class);
     private final RateLimiter rateLimiter = mock(RateLimiter.class);
-    private final RateLimitPolicies policies = new RateLimitPolicies(20, Duration.ofHours(1), 60, Duration.ofMinutes(1));
+    private final RateLimitPolicies policies = new RateLimitPolicies(20, Duration.ofHours(1), 60, Duration.ofMinutes(1), 30, Duration.ofMinutes(10));
     private final AskCache cache = mock(AskCache.class);
     private final AiBudgetService budget = mock(AiBudgetService.class);
     private final AskService service = service(true);

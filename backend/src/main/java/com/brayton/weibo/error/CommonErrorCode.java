@@ -38,6 +38,9 @@ public enum CommonErrorCode implements ErrorCode {
     FILE_LIST_NULL(4002, "file list is null"),
     PICTURE_MAX_NINE(4003, "you can only upload 9 pictures"),
     R2_UPLOAD_FAILED(4004, "R2 upload failed"),
+    FILE_TYPE_NOT_ALLOWED(4005, "only jpg, png, gif, webp, heic, heif images are allowed"),
+    FILE_TOO_LARGE(4006, "each image must be at most 10MB"),
+    FILE_EMPTY(4007, "file is empty"),
     
     INTERNAL_ERROR(5000, "internal error"),;
 
