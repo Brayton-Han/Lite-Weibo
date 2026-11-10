@@ -118,8 +118,8 @@ export default function CreatePostWidget({ onPostCreated }: CreatePostWidgetProp
         try {
             const files = selectedFiles.map(f => f.file);
             imageUrls = await uploadImages(files);
-        } catch (uploadError: any) {
-            toast.error(uploadError.message || "Failed to upload images");
+        } catch (uploadError) {
+            toast.error((uploadError as Error).message || "Failed to upload images");
             setIsSubmitting(false);
             return; 
         }

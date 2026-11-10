@@ -244,7 +244,7 @@ export default function NotificationsClient() {
           
           <Link href={`/post/${item.postId}`} className="block">
             <span className="text-sm text-gray-800 line-clamp-2 hover:text-blue-600 transition-colors">
-              "{item.commentContent}"
+              &ldquo;{item.commentContent}&rdquo;
             </span>
           </Link>
           {/* 4. 修改：使用 formatDateTime */}

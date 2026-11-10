@@ -78,8 +78,10 @@
 
 ### CI
 
-- [ ] 新建 `.github/workflows`：`./mvnw test`、`npm ci && npm run lint && npm run build`
-- [ ] Smoke test 类测试（需要真实 API key 的）在 CI 中跳过或单独触发
+- [x] 新建 `.github/workflows`：`./mvnw test`、`npm ci && npm run lint && npm run build`
+      ——`.github/workflows/ci.yml`，push main / PR 触发；顺带修掉了前端 13 个 ESLint error 让 lint 能过
+- [x] Smoke test 类测试（需要真实 API key 的）在 CI 中跳过或单独触发
+      ——`*SmokeTest` 已用 `@EnabledIfEnvironmentVariable` 守卫，CI 不注入 key，自动跳过
 
 ---
 

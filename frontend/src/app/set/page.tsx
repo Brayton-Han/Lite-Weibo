@@ -152,8 +152,8 @@ export default function SettingsPage() {
     if (selectedFile) {
       try {
         finalAvatarUrl = await uploadAvatarImage(selectedFile);
-      } catch (uploadError: any) {
-        toast.error(uploadError.message || "Failed to upload avatar");
+      } catch (uploadError) {
+        toast.error((uploadError as Error).message || "Failed to upload avatar");
         setIsSaving(false);
         return; // 图片上传失败则终止
       }

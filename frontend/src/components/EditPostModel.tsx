@@ -129,8 +129,8 @@ export default function EditPostModal({ isOpen, onClose, post, onPostUpdated }: 
         try {
             const files = newFiles.map(f => f.file);
             newlyUploadedUrls = await uploadImages(files);
-        } catch (uploadError: any) {
-            toast.error(uploadError.message || "Failed to upload new images");
+        } catch (uploadError) {
+            toast.error((uploadError as Error).message || "Failed to upload new images");
             setIsSubmitting(false);
             return; 
         }

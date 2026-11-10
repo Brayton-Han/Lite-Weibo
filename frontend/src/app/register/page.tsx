@@ -36,7 +36,7 @@ export default function RegisterPage(): JSX.Element {
     setIsSubmitting(true);
 
     const registerPromise = async () => {
-      const res = await api.post<ApiResponse<String>>('/register', formData);
+      const res = await api.post<ApiResponse<string>>('/register', formData);
       if (res?.data?.code !== 0) {
         throw new Error(res?.data?.message || 'Registration failed');
       }
