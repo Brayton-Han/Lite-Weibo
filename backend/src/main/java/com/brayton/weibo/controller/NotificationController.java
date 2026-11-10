@@ -45,7 +45,7 @@ public class NotificationController {
     ) {
         EventType notifType = EventType.valueOf(type.toUpperCase());
         List<NotificationResponse> notifications = notificationService.getNotifications(
-                user.getId(), notifType, lastId, size
+                user.getId(), notifType, lastId, PageLimits.clamp(size)
         );
         return ResponseEntity.ok(ApiResponse.success(notifications));
     }

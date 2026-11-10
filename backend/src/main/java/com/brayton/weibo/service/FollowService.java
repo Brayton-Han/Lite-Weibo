@@ -72,19 +72,14 @@ public class FollowService {
         }
 
         if (lastId == null) {
-            return followRepository.findFollowerIds(id, PageRequest.of(0, size))
-                    .stream()
-                    .map(userService::getUserInfoById)
-                    .toList();
+            return userService.getUserInfosInOrder(followRepository.findFollowerIds(id, PageRequest.of(0, size)));
         }
 
         FollowRelation relation = followRepository.findByFollowerIdAndFollowingId(lastId, id)
                 .orElseThrow(() -> new WeiboException(CommonErrorCode.FOLLOWING_ID_NOT_EXISTS));
 
-        return followRepository.findFollowerIds(id, relation.getId(), PageRequest.of(0, size))
-                .stream()
-                .map(userService::getUserInfoById)
-                .toList();
+        return userService.getUserInfosInOrder(
+                followRepository.findFollowerIds(id, relation.getId(), PageRequest.of(0, size)));
     }
 
     public List<UserResponse> getFollowings(Long id, Long lastId, int size) {
@@ -94,30 +89,31 @@ public class FollowService {
         }
 
         if (lastId == null) {
-            return followRepository.findFollowingIds(id, PageRequest.of(0, size))
-                    .stream()
-                    .map(userService::getUserInfoById)
-                    .toList();
+            return userService.getUserInfosInOrder(followRepository.findFollowingIds(id, PageRequest.of(0, size)));
         }
 
         FollowRelation relation = followRepository.findByFollowerIdAndFollowingId(id, lastId)
                 .orElseThrow(() -> new WeiboException(CommonErrorCode.FOLLOWING_ID_NOT_EXISTS));
 
-        return followRepository.findFollowingIds(id, relation.getId(), PageRequest.of(0, size))
-                .stream()
-                .map(userService::getUserInfoById)
-                .toList();
+        return userService.getUserInfosInOrder(
+                followRepository.findFollowingIds(id, relation.getId(), PageRequest.of(0, size)));
     }
 
-    public List<UserResponse> getFriends(long id) {
+    /** 好友（互关）列表，与关注列表同样按关系 id keyset 分页；lastId 为上一页最后一个好友的用户 id */
+    public List<UserResponse> getFriends(long id, Long lastId, int size) {
 
         if (!userRepository.existsById(id)) {
             throw new WeiboException(CommonErrorCode.USER_NOT_FOUND);
         }
 
-        return followRepository.findFriendIds(id)
-                .stream()
-                .map(userService::getUserInfoById)
-                .toList();
+        if (lastId == null) {
+            return userService.getUserInfosInOrder(followRepository.findFriendIds(id, PageRequest.of(0, size)));
+        }
+
+        FollowRelation relation = followRepository.findByFollowerIdAndFollowingId(id, lastId)
+                .orElseThrow(() -> new WeiboException(CommonErrorCode.FOLLOWING_ID_NOT_EXISTS));
+
+        return userService.getUserInfosInOrder(
+                followRepository.findFriendIds(id, relation.getId(), PageRequest.of(0, size)));
     }
 }

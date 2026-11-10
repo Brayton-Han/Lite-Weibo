@@ -34,7 +34,7 @@ public class PostController {
             @RequestParam(required = false) Long lastId,
             @RequestParam(defaultValue = "10") int size
             ) {
-        List<PostResponse> posts = postService.getAllPosts(uid, self.getId(), lastId, size);
+        List<PostResponse> posts = postService.getAllPosts(uid, self.getId(), lastId, PageLimits.clamp(size));
         return ResponseEntity.ok(ApiResponse.success(posts));
     }
 
@@ -61,7 +61,7 @@ public class PostController {
             @RequestParam(defaultValue = "10") int size,
             @AuthenticationPrincipal CustomUserDetails self
     ) {
-        List<PostResponse> posts = postService.getNewestFeed(self.getId(), cursor, size);
+        List<PostResponse> posts = postService.getNewestFeed(self.getId(), cursor, PageLimits.clamp(size));
         return ResponseEntity.ok(ApiResponse.success(posts));
     }
 
@@ -77,7 +77,7 @@ public class PostController {
             @RequestParam(defaultValue = "10") int size,
             @AuthenticationPrincipal CustomUserDetails self
     ) {
-        List<PostResponse> posts = postService.getFriendPosts(self.getId(), lastId, size);
+        List<PostResponse> posts = postService.getFriendPosts(self.getId(), lastId, PageLimits.clamp(size));
         return ResponseEntity.ok(ApiResponse.success(posts));
     }
 
@@ -97,7 +97,7 @@ public class PostController {
             @RequestParam(required = false) Long cursor,
             @RequestParam(defaultValue = "10") int size
     ) {
-        LikedPostsResponse posts = postService.getLikedPosts(uid, self.getId(), cursor, size);
+        LikedPostsResponse posts = postService.getLikedPosts(uid, self.getId(), cursor, PageLimits.clamp(size));
         return ResponseEntity.ok(ApiResponse.success(posts));
     }
 
@@ -108,7 +108,7 @@ public class PostController {
             @RequestParam(required = false) Long lastId,
             @AuthenticationPrincipal CustomUserDetails self
     ) {
-        List<PostResponse> posts = postService.getSearchResults(q, lastId, size, self.getId());
+        List<PostResponse> posts = postService.getSearchResults(q, lastId, PageLimits.clamp(size), self.getId());
         return ResponseEntity.ok(ApiResponse.success(posts));
     }
 
@@ -119,7 +119,7 @@ public class PostController {
             @AuthenticationPrincipal CustomUserDetails self
     ) {
         rateLimiter.check(rateLimitPolicies.search(), self.getId());
-        List<ScoredPostResponse> posts = semanticSearchService.search(q, k, self.getId());
+        List<ScoredPostResponse> posts = semanticSearchService.search(q, PageLimits.clamp(k), self.getId());
         return ResponseEntity.ok(ApiResponse.success(posts));
     }
 
@@ -131,7 +131,7 @@ public class PostController {
             @AuthenticationPrincipal CustomUserDetails self
     ) {
         rateLimiter.check(rateLimitPolicies.search(), self.getId());
-        return ResponseEntity.ok(ApiResponse.success(retrievalDetailService.explain(q, k, self.getId())));
+        return ResponseEntity.ok(ApiResponse.success(retrievalDetailService.explain(q, PageLimits.clamp(k), self.getId())));
     }
 
     /**

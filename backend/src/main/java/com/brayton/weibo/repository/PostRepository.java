@@ -25,6 +25,10 @@ public interface PostRepository extends JpaRepository<Post, Long> {
 
     int countPostsByUserId(long userId);
 
+    /** 批量统计发帖数，返回 [userId, count]；没发过帖的用户不在结果里 */
+    @Query("select p.user.id, count(p) from Post p where p.user.id in :userIds group by p.user.id")
+    List<Object[]> countPostsByUserIds(@Param("userIds") Collection<Long> userIds);
+
     @Query("select p.id from Post p where p.user.id = :authorId and p.createdAt >= :since")
     List<Long> findIdsByAuthorSince(@Param("authorId") long authorId,
                                     @Param("since") LocalDateTime since);

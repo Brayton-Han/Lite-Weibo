@@ -38,8 +38,11 @@ public class UserController {
     }
 
     @GetMapping("/users")
-    public ResponseEntity<ApiResponse<?>> getAllUsers() {
-        List<UserResponse> users = userService.getAllUsers();
+    public ResponseEntity<ApiResponse<?>> getUsers(
+            @RequestParam(required = false) Long lastId,
+            @RequestParam(defaultValue = "20") int size
+    ) {
+        List<UserResponse> users = userService.getUsers(lastId, PageLimits.clamp(size));
         return ResponseEntity.ok(ApiResponse.success(users));
     }
 

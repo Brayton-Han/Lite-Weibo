@@ -7,30 +7,54 @@ import { Loader2, Users, FileText, Heart, Mars, Venus, User as UserIcon } from '
 import Link from 'next/link';
 import { toast } from 'react-hot-toast';
 
+// 后端按粉丝数降序 keyset 分页，单页上限 20
+const PAGE_SIZE = 20;
+
+// 拉取一页用户；lastId 为上一页最后一个用户的 id，不传表示第一页。失败时提示并返回 null
+async function fetchUsersPage(lastId?: number): Promise<User[] | null> {
+  try {
+    const params = new URLSearchParams({ size: PAGE_SIZE.toString() });
+    if (lastId !== undefined) params.append('lastId', lastId.toString());
+    const res = await api.get<ApiResponse<User[]>>(`/users?${params}`);
+    if (res.data.code === 0) return res.data.data || [];
+    toast.error(res.data.message || 'Failed to load users');
+  } catch (error) {
+    console.error(error);
+    toast.error('Network error');
+  }
+  return null;
+}
+
 export default function UsersPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
 
   useEffect(() => {
-    const fetchUsers = async () => {
-      try {
-        // 假设获取所有用户的接口是 /users
-        const res = await api.get<ApiResponse<User[]>>('/users'); 
-        if (res.data.code === 0) {
-          setUsers(res.data.data || []);
-        } else {
-          toast.error(res.data.message || 'Failed to load users');
-        }
-      } catch (error) {
-        console.error(error);
-        toast.error('Network error');
-      } finally {
-        setLoading(false);
+    let cancelled = false;
+    (async () => {
+      const page = await fetchUsersPage();
+      if (cancelled) return;
+      if (page) {
+        setUsers(page);
+        setHasMore(page.length >= PAGE_SIZE);
       }
-    };
-
-    fetchUsers();
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
   }, []);
+
+  const handleLoadMore = async () => {
+    if (loadingMore || users.length === 0) return;
+    setLoadingMore(true);
+    const page = await fetchUsersPage(users[users.length - 1].id);
+    if (page) {
+      setUsers(prev => [...prev, ...page]);
+      setHasMore(page.length >= PAGE_SIZE);
+    }
+    setLoadingMore(false);
+  };
 
   // 根据 Gender 枚举渲染图标
   const getGenderIcon = (gender: Gender | null) => {
@@ -127,6 +151,23 @@ export default function UsersPage() {
                 </div>
               </Link>
             ))}
+          </div>
+        )}
+
+        {!loading && users.length > 0 && (
+          <div className="flex justify-center mt-8">
+            {hasMore ? (
+              <button
+                onClick={handleLoadMore}
+                disabled={loadingMore}
+                className="px-6 py-2 text-sm font-medium text-blue-600 bg-white border border-gray-200 rounded-full shadow-sm hover:bg-blue-50 disabled:opacity-50 flex items-center gap-2"
+              >
+                {loadingMore && <Loader2 className="animate-spin" size={16} />}
+                Load more
+              </button>
+            ) : (
+              <p className="text-sm text-gray-400">That&apos;s everyone!</p>
+            )}
           </div>
         )}
       </div>
