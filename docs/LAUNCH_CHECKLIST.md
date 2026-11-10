@@ -45,13 +45,16 @@
 
 ### 接口滥用
 
-- [ ] `GET /users` 删除或改为分页，并消除逐个用户查帖子数的 N+1
-- [ ] 所有分页参数（`size`、`k`）统一加上限（如 50），`controller/PostController.java` 逐个检查
+- [x] `GET /users` 删除或改为分页，并消除逐个用户查帖子数的 N+1
+      ——按 `(follower_count DESC, id DESC)` keyset 分页（`lastId` + `size`，V9 加配套索引）；发帖数每页一次 `group by` 批量查；前端 `/users` 加「Load more」
+- [x] 所有分页参数（`size`、`k`）统一加上限（如 50），`controller/PostController.java` 逐个检查
+      ——上限 20（`controller/PageLimits`），超出截断、非正数按 1；Post / Follow / Notification / User 四个 controller 共 11 处
 - [x] `config/WebSocketConfig.java` 的 `setAllowedOriginPatterns("*")` 改为与 CORS 相同的白名单
       ——改为 `setAllowedOrigins`，读同一个 `cors.allowed-origins`
 - [x] 反向代理关闭或脱敏 `/ws` 请求的 query 日志（token 在 query 参数里）
       ——Caddy 访问日志删除 query 里的 `token` 和 `Authorization` 头
-- [ ] 验收：`size=100000` 返回被截断的结果；跨域 origin 的 WebSocket 握手被拒
+- [x] 验收：`size=100000` 返回被截断的结果；跨域 origin 的 WebSocket 握手被拒
+      ——实测 `/users`、`/posts`、`/user/{id}/posts` 传 `size=100000` 均返回 20 条；WebSocket 非白名单 origin 握手 403（见 network-domain PR）
 
 ---
 

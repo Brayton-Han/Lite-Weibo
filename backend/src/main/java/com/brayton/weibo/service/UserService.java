@@ -11,10 +11,14 @@ import com.brayton.weibo.repository.FollowRepository;
 import com.brayton.weibo.repository.PostRepository;
 import com.brayton.weibo.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 @Service
@@ -72,15 +76,21 @@ public class UserService {
                 followRepository.findFriendCountIds(id),
                 postRepository.countPostsByUserId(id));
     }
-    /* Don't need relevant attribute */
-    public UserResponse getUserInfoById(long id) {
-
-        Optional<User> userOptional = userRepository.findById(id);
-        if (userOptional.isEmpty()) {
-            throw new WeiboException(CommonErrorCode.USER_NOT_FOUND);
+    /**
+     * 列表场景的用户卡片（不含关注关系与计数）：一次 findAllById 取回，按 ids 原顺序返回。
+     * 期间被删除的用户直接跳过，不因一个人整页失败。
+     */
+    public List<UserResponse> getUserInfosInOrder(List<Long> ids) {
+        if (ids.isEmpty()) return List.of();
+        Map<Long, User> byId = new HashMap<>();
+        for (User u : userRepository.findAllById(ids)) {
+            byId.put(u.getId(), u);
         }
-
-        return new UserResponse(userOptional.get(), false, false, 0, 0);
+        return ids.stream()
+                .map(byId::get)
+                .filter(Objects::nonNull)
+                .map(u -> new UserResponse(u, false, false, 0, 0))
+                .toList();
     }
 
     public String getUsernameById(long id) {
@@ -124,11 +134,31 @@ public class UserService {
         userRepository.save(user);
     }
 
-    public List<UserResponse> getAllUsers() {
+    /**
+     * 用户列表，按粉丝数降序 keyset 分页。lastId 为上一页最后一个用户的 id，null 表示第一页。
+     * 游标位置取该用户当前的粉丝数；翻页间隙粉丝数变化可能导致个别用户重复或跳过，列表页可接受。
+     * 发帖数一次批量 group by 查出，避免逐个用户查询（N+1）。
+     */
+    public List<UserResponse> getUsers(Long lastId, int size) {
 
-        List<User> users = userRepository.getAllUsers();
+        PageRequest page = PageRequest.of(0, size);
+        List<User> users;
+        if (lastId == null) {
+            users = userRepository.findUsersPage(page);
+        } else {
+            User cursor = userRepository.findById(lastId)
+                    .orElseThrow(() -> new WeiboException(CommonErrorCode.USER_NOT_FOUND));
+            users = userRepository.findUsersPageAfter(cursor.getFollowerCount(), cursor.getId(), page);
+        }
+        if (users.isEmpty()) return List.of();
+
+        Map<Long, Long> postCounts = new HashMap<>();
+        for (Object[] row : postRepository.countPostsByUserIds(users.stream().map(User::getId).toList())) {
+            postCounts.put((Long) row[0], (Long) row[1]);
+        }
         return users.stream()
-                .map(u -> new UserResponse(u, false, false, 0, postRepository.countPostsByUserId(u.getId())))
+                .map(u -> new UserResponse(u, false, false, 0,
+                        postCounts.getOrDefault(u.getId(), 0L).intValue()))
                 .toList();
     }
 }

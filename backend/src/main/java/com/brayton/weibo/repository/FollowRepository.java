@@ -103,6 +103,37 @@ public interface FollowRepository extends JpaRepository<FollowRelation, Long> {
 """)
     Set<Long> findFriendIds(Long userId);
 
+    /** 好友列表首页：按 userId 关注对方的那条关系的 id 降序（与关注列表同序） */
+    @Query("""
+    SELECT f.followingId
+    FROM FollowRelation f
+    WHERE f.followerId = :userId
+      AND EXISTS (
+          SELECT 1 FROM FollowRelation f2
+          WHERE f2.followerId = f.followingId
+            AND f2.followingId = :userId
+      )
+    ORDER BY f.id DESC
+""")
+    List<Long> findFriendIds(@Param("userId") Long userId, Pageable pageable);
+
+    /** 好友列表后续页：从关系 id lastRelationId 之后继续 */
+    @Query("""
+    SELECT f.followingId
+    FROM FollowRelation f
+    WHERE f.followerId = :userId
+      AND f.id < :lastRelationId
+      AND EXISTS (
+          SELECT 1 FROM FollowRelation f2
+          WHERE f2.followerId = f.followingId
+            AND f2.followingId = :userId
+      )
+    ORDER BY f.id DESC
+""")
+    List<Long> findFriendIds(@Param("userId") Long userId,
+                             @Param("lastRelationId") Long lastRelationId,
+                             Pageable pageable);
+
     @Query("""
     SELECT COUNT(*)
     FROM FollowRelation f

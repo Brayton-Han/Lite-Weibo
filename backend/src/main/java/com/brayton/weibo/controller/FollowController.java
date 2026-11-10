@@ -28,7 +28,7 @@ public class FollowController {
             @RequestParam(defaultValue = "10") int size,
             @RequestParam(required = false) Long lastId
     ) {
-        List<UserResponse> followingList = followService.getFollowings(id, lastId, size);
+        List<UserResponse> followingList = followService.getFollowings(id, lastId, PageLimits.clamp(size));
         return ResponseEntity.ok(ApiResponse.success(followingList));
     }
 
@@ -39,13 +39,17 @@ public class FollowController {
             @RequestParam(required = false) Long lastId
     ) {
         log.debug("关注列表分页 size={} lastId={}", size, lastId);
-        List<UserResponse> followerList = followService.getFollowers(id, lastId, size);
+        List<UserResponse> followerList = followService.getFollowers(id, lastId, PageLimits.clamp(size));
         return ResponseEntity.ok(ApiResponse.success(followerList));
     }
 
     @GetMapping("user/{id}/friends")
-    public ResponseEntity<ApiResponse<?>> getFriendsList(@PathVariable long id) {
-        List<UserResponse> friendsList = followService.getFriends(id);
+    public ResponseEntity<ApiResponse<?>> getFriendsList(
+            @PathVariable long id,
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(required = false) Long lastId
+    ) {
+        List<UserResponse> friendsList = followService.getFriends(id, lastId, PageLimits.clamp(size));
         return ResponseEntity.ok(ApiResponse.success(friendsList));
     }
 

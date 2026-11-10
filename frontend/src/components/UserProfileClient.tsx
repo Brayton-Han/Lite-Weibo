@@ -159,21 +159,17 @@ export default function UserProfileClient({ viewedUserId, activeTab }: UserProfi
     else setListLoadingMore(true);
 
     try {
+      // following / followers / friends 都是 keyset 分页，lastId 为上一页最后一个用户的 id
       const params = new URLSearchParams();
-      if (activeTab === 'friends') {
-        params.append('size', '10000');
-      } else {
-        params.append('size', PAGE_SIZE.toString());
-        if (lastId) params.append('lastId', lastId.toString());
-      }
+      params.append('size', PAGE_SIZE.toString());
+      if (lastId) params.append('lastId', lastId.toString());
 
       const res = await api.get<ApiResponse<User[]>>(`${urlBase}?${params.toString()}`);
 
       if (res.data.code === 0) {
         const newUsers = res.data.data || [];
         
-        if (activeTab === 'friends') setListHasMore(false);
-        else setListHasMore(newUsers.length >= PAGE_SIZE);
+        setListHasMore(newUsers.length >= PAGE_SIZE);
 
         if (isInit) setUserList(newUsers);
         else setUserList(prev => [...prev, ...newUsers]);
