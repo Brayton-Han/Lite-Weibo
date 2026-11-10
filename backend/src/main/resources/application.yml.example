@@ -19,12 +19,20 @@ spring:
     redis:
       host: localhost
       port: 6379
+      # 与根目录 .env 的 REDIS_PASSWORD 一致（docker compose 起的 Redis 开了 requirepass）
+      password: CHANGE_ME
       timeout: 3000
       lettuce:
         pool:
           max-active: 8
           max-idle: 8
           min-idle: 0
+  # 与根目录 .env 的 RABBITMQ_USER / RABBITMQ_PASSWORD 一致
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: weibo
+    password: CHANGE_ME
   servlet:
     multipart:
       max-file-size: 20MB
@@ -105,6 +113,8 @@ r2:
 
 # ─────────────────────────────────────────────────────────────
 # 用法：cp application.yml.example application.yml，填入真实值。
+#       本文件只用于本机 ./mvnw spring-boot:run；docker compose 部署时
+#       所有密钥由根目录 .env 经环境变量注入，优先级高于本文件。
 #
 # application.yml 已在 backend/.gitignore 中，不会被提交。
 #

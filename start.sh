@@ -79,6 +79,11 @@ case "$ACTION" in
         ;;
 esac
 
+if [ ! -f .env ]; then
+    echo "❌ 缺少 .env：请先 cp .env.example .env 并填写密码与密钥"
+    exit 1
+fi
+
 echo "🚀 Lite-Weibo 一键启动"
 echo "=================================="
 echo ""
@@ -129,9 +134,9 @@ echo "✅ 启动完成，服务地址:"
 echo ""
 echo "   前端            http://localhost:3000"
 echo "   后端 API        http://localhost:8080"
-echo "   RabbitMQ 控制台 http://localhost:15672   (guest / guest)"
-echo "   PostgreSQL      localhost:5432          (postgres / 123456)"
-echo "   Redis           localhost:6379"
+echo "   RabbitMQ 控制台 http://localhost:15672   (账号密码见 .env)"
+echo "   PostgreSQL      localhost:5432          (postgres / 见 .env)"
+echo "   Redis           localhost:6379          (密码见 .env)"
 echo ""
 echo "   回灌缓存  ./start.sh backfill"
 echo "   查看日志  ./start.sh logs"
