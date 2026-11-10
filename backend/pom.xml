@@ -118,6 +118,18 @@
 
 	<build>
 		<plugins>
+			<!-- application.yml 是本地开发配置，含密钥（已 gitignore），不打进 jar / 镜像。
+			     容器内配置 = application.properties（入库、无密钥）+ docker-compose 注入的环境变量。
+			     只影响打包，target/classes 里仍有它，./mvnw spring-boot:run 照常读取。 -->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-jar-plugin</artifactId>
+				<configuration>
+					<excludes>
+						<exclude>application.yml</exclude>
+					</excludes>
+				</configuration>
+			</plugin>
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-compiler-plugin</artifactId>

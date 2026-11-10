@@ -120,13 +120,14 @@ How to read these numbers:
 Requires Docker Desktop; local development additionally needs JDK 21 and Node.js.
 
 ```bash
-# 1. Backend config (application.yml is gitignored)
-cp backend/src/main/resources/application.yml.example backend/src/main/resources/application.yml
-#    fill in jwt.secret, R2 credentials, etc.
+# 1. Secrets for docker compose (.env is gitignored)
+cp .env.example .env
+#    fill in database / Redis / RabbitMQ passwords, JWT_SECRET, R2 credentials;
+#    VOYAGE_API_KEY / ANTHROPIC_API_KEY are optional (semantic search / Q&A)
 
-# 2. Optional: keys for semantic search / Q&A, passed only via environment variables
-export VOYAGE_API_KEY=...
-export ANTHROPIC_API_KEY=...
+# 2. Backend config for running outside Docker (application.yml is gitignored)
+cp backend/src/main/resources/application.yml.example backend/src/main/resources/application.yml
+#    use the same passwords as .env
 
 # 3. Start everything
 ./start.sh                 # build the backend JAR and start all services
@@ -140,8 +141,8 @@ export ANTHROPIC_API_KEY=...
 |---|---|
 | Frontend | http://localhost:3000 |
 | Backend API | http://localhost:8080 |
-| RabbitMQ management UI | http://localhost:15672 (guest / guest) |
-| PostgreSQL / Redis | localhost:5432 / localhost:6379 |
+| RabbitMQ management UI | http://localhost:15672 (credentials from `.env`) |
+| PostgreSQL / Redis | localhost:5432 / localhost:6379 (bound to 127.0.0.1, passwords from `.env`) |
 | Actuator (metrics) | http://127.0.0.1:8081/actuator/metrics |
 
 Without `VOYAGE_API_KEY`, posting and keyword search still work, but no embeddings are generated and semantic search is unavailable.

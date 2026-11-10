@@ -137,8 +137,7 @@ bin/runjava com.rabbitmq.perf.PerfTest \
 ### 查看 RabbitMQ 管理面板
 ```
 打开浏览器访问: http://localhost:15672
-默认用户名: guest
-默认密码: guest
+用户名 / 密码: 根目录 .env 的 RABBITMQ_USER / RABBITMQ_PASSWORD
 ```
 
 ### 主要监控指标

@@ -177,9 +177,8 @@ Also Connected:
 
 **Database**:
 - URL: `jdbc:postgresql://localhost:5432/weibo`
-- Username: `dev`
-- Password: `123456`
-- Auto-migration: Enabled via `ddl-auto: update`
+- Username / Password: see `application.yml` (local) or root `.env` (docker compose)
+- Schema: Flyway migrations (`db/migration`), `ddl-auto: validate`
 
 **Server**:
 - Port: `8080`

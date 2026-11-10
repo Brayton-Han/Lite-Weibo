@@ -25,8 +25,7 @@ TEST_MODE=comment-throughput ./mvnw spring-boot:run
 ### RabbitMQ 管理面板
 ```
 地址：http://localhost:15672
-用户：guest
-密码：guest
+用户 / 密码：根目录 .env 的 RABBITMQ_USER / RABBITMQ_PASSWORD
 ```
 
 **重点监控指标：**
