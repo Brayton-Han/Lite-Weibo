@@ -37,11 +37,18 @@
 
 ### 认证与账号（`service/UserService.java`、`dto/RegisterRequest.java`）
 
-- [ ] `/login`、`/register` 加限流（按 IP + 用户名），防暴力破解
-- [ ] 登录失败统一返回「用户名或密码错误」，不区分用户不存在 / 密码错误
-- [ ] 注册校验：密码最短 8 位；用户名长度与字符集限制；邮箱长度限制
-- [ ] `PUT /set` 改用独立的 `UpdateUserRequest` + `@Valid`：username / bio 长度限制，avatarUrl 只允许本站 R2 域名
-- [ ] 验收：超长 bio、外链头像、空密码均返回 400
+- [x] `/login`、`/register` 加限流（按 IP + 用户名），防暴力破解
+      ——`AuthRateLimitPolicies`：login-ip 30/10m、login-user 10/10m、register-ip 10/1h，超限 429；
+      `server.forward-headers-strategy=native` 在 Caddy 后取真实 IP（只采信内网直连方的 X-Forwarded-For）
+- [x] 登录失败统一返回「用户名或密码错误」，不区分用户不存在 / 密码错误
+      ——统一 `INVALID_CREDENTIALS(1008)`；用户不存在时也跑一次 BCrypt（启动时预生成假哈希），实测两种失败耗时中位数 61ms / 58ms
+- [x] 注册校验：密码最短 8 位；用户名长度与字符集限制；邮箱长度限制
+      ——密码 8–72（BCrypt 72 字节上限）；用户名 2–20，Unicode 字母 / 数字 / 下划线（兼容现有中文昵称）；邮箱 ≤ 254；
+      规则集中在 `dto/UserConstraints`，前端 `lib/userRules.ts` 同步预校验
+- [x] `PUT /set` 改用独立的 `UpdateUserRequest` + `@Valid`：username / bio 长度限制，avatarUrl 只允许本站 R2 域名
+      ——bio ≤ 160、birthday 不能是未来；`@R2AvatarUrl` 要求以 `r2.publicBaseUrl` + `/` 开头（防 `r2.dev.evil.com` 这类伪装）
+- [x] 验收：超长 bio、外链头像、空密码均返回 400
+      ——参数校验失败由 200 + 4001 改为真正的 HTTP 400（body 不变，前端拦截器照常解析）；本地实测三者均 400
 
 ### 接口滥用
 

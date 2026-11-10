@@ -61,7 +61,8 @@ public class GlobalExceptionHandler {
                 request.getRequestURI()
         );
 
-        return new ResponseEntity<>(error, HttpStatus.OK);
+        // 参数校验失败回真正的 400：属于客户端错误，网关 / 监控按状态码统计；前端 api 拦截器会把 body 转成统一的 {code, message}
+        return new ResponseEntity<>(error, HttpStatus.BAD_REQUEST);
     }
 
 }

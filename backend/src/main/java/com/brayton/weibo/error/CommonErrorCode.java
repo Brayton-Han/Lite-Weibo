@@ -13,6 +13,8 @@ public enum CommonErrorCode implements ErrorCode {
     FOLLOWING_ID_NOT_EXISTS(1005, "you have not following the user"),
     FOLLOW_YOURSELF(1006, "you can't follow yourself"),
     USERNAME_ALREADY_EXISTS(1007, "username already exists"),
+    /** 登录失败统一用这个，不区分用户不存在 / 密码错误，防止枚举用户名 */
+    INVALID_CREDENTIALS(1008, "invalid username or password"),
 
     POST_CONTENT_NULL(1500, "post content is null"),
     POST_NOT_FOUND(1501, "post not found"),

@@ -3,6 +3,7 @@ package com.brayton.weibo.service;
 import com.brayton.weibo.dto.LoginRequest;
 import com.brayton.weibo.dto.LoginResponse;
 import com.brayton.weibo.dto.RegisterRequest;
+import com.brayton.weibo.dto.UpdateUserRequest;
 import com.brayton.weibo.dto.UserResponse;
 import com.brayton.weibo.entity.User;
 import com.brayton.weibo.error.CommonErrorCode;
@@ -10,6 +11,7 @@ import com.brayton.weibo.error.WeiboException;
 import com.brayton.weibo.repository.FollowRepository;
 import com.brayton.weibo.repository.PostRepository;
 import com.brayton.weibo.repository.UserRepository;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -48,19 +50,35 @@ public class UserService {
 
     public LoginResponse login(LoginRequest request) {
 
-        // 1. 查找用户
+        // 用户不存在和密码错误返回同一个错误码；不存在时也跑一次 BCrypt，
+        // 否则「不存在」立刻返回、「密码错」要等几十毫秒，响应时间就能区分出用户名是否存在
         Optional<User> userOptional = userRepository.findByUsername(request.getUsername());
-        if (userOptional.isEmpty()) {
-            throw new WeiboException(CommonErrorCode.USER_NOT_FOUND);
+        String hash = userOptional.map(User::getPasswordHashed).orElseGet(this::dummyHash);
+        boolean matches = passwordEncoder.matches(request.getPassword(), hash);
+        if (userOptional.isEmpty() || !matches) {
+            throw new WeiboException(CommonErrorCode.INVALID_CREDENTIALS);
         }
         User user = userOptional.get();
 
-        // 2. 验证密码 (实际应用中需要用 passwordEncoder.matches(rawPassword, encodedPassword) 验证)
-        if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHashed())) { // 临时简化处理
-            throw new WeiboException(CommonErrorCode.INVALID_PASSWORD);
-        }
-
         return new LoginResponse(jWTService.generateToken(user.getId()), user.getId().toString());
+    }
+
+    /** 用户不存在时拿来比对的哈希，与真实哈希同一算法同一强度 */
+    private volatile String dummyHash;
+
+    /** 启动时预先生成：否则第一次「用户不存在」要多算一次 encode，耗时能区分出来 */
+    @PostConstruct
+    void warmUpDummyHash() {
+        dummyHash();
+    }
+
+    private String dummyHash() {
+        String h = dummyHash;
+        if (h == null) {
+            h = passwordEncoder.encode("dummy-password-for-timing");
+            dummyHash = h;
+        }
+        return h;
     }
 
     public UserResponse getUserInfoById(long id, long selfId) {
@@ -103,7 +121,7 @@ public class UserService {
         return userOptional.get().getUsername();
     }
 
-    public void update(long id, UserResponse info) {
+    public void update(long id, UpdateUserRequest info) {
         // 1. 查找当前用户
         // 必须从数据库获取最新的实体对象，而不是直接 new User()，否则会丢失原有的其他字段（如密码、创建时间等）
         User user = userRepository.findById(id)

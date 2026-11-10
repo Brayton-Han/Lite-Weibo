@@ -1,5 +1,6 @@
 'use client';
 import React, { JSX, useState } from 'react';
+import { EMAIL_MAX, PASSWORD_MAX, PASSWORD_MIN, USERNAME_MAX, validateUsername } from '@/lib/userRules';
 import api from '@/lib/api';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -16,11 +17,14 @@ export default function RegisterPage(): JSX.Element {
   const router = useRouter();
 
   const validate = (data: RegisterRequest): string | null => {
-    if (!data.username.trim()) return 'Username cannot be empty.';
+    const usernameError = validateUsername(data.username);
+    if (usernameError) return usernameError;
     if (!data.email.trim()) return 'Email cannot be empty.';
     const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRe.test(data.email)) return 'Please enter a valid email.';
-    if (data.password.length < 6) return 'Password must be at least 6 characters.';
+    if (!emailRe.test(data.email) || data.email.length > EMAIL_MAX) return 'Please enter a valid email.';
+    if (data.password.length < PASSWORD_MIN || data.password.length > PASSWORD_MAX) {
+      return `Password must be ${PASSWORD_MIN}-${PASSWORD_MAX} characters.`;
+    }
     return null;
   };
 
@@ -87,6 +91,7 @@ export default function RegisterPage(): JSX.Element {
               placeholder="Enter your username"
               className="flex-1 h-10 p-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-200 transition-all"
               value={formData.username}
+              maxLength={USERNAME_MAX}
               onChange={(e) => setFormData({ ...formData, username: e.target.value })}
               disabled={isSubmitting}
             />
@@ -106,6 +111,7 @@ export default function RegisterPage(): JSX.Element {
               placeholder="name@example.com"
               className="flex-1 h-10 p-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-200 transition-all"
               value={formData.email}
+              maxLength={EMAIL_MAX}
               onChange={(e) => setFormData({ ...formData, email: e.target.value })}
               disabled={isSubmitting}
             />
@@ -125,6 +131,7 @@ export default function RegisterPage(): JSX.Element {
               placeholder="••••••••"
               className="flex-1 h-10 p-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-200 transition-all"
               value={formData.password}
+              maxLength={PASSWORD_MAX}
               onChange={(e) => setFormData({ ...formData, password: e.target.value })}
               disabled={isSubmitting}
             />
