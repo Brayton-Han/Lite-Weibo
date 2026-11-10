@@ -47,8 +47,10 @@
 
 - [ ] `GET /users` 删除或改为分页，并消除逐个用户查帖子数的 N+1
 - [ ] 所有分页参数（`size`、`k`）统一加上限（如 50），`controller/PostController.java` 逐个检查
-- [ ] `config/WebSocketConfig.java` 的 `setAllowedOriginPatterns("*")` 改为与 CORS 相同的白名单
-- [ ] 反向代理关闭或脱敏 `/ws` 请求的 query 日志（token 在 query 参数里）
+- [x] `config/WebSocketConfig.java` 的 `setAllowedOriginPatterns("*")` 改为与 CORS 相同的白名单
+      ——改为 `setAllowedOrigins`，读同一个 `cors.allowed-origins`
+- [x] 反向代理关闭或脱敏 `/ws` 请求的 query 日志（token 在 query 参数里）
+      ——Caddy 访问日志删除 query 里的 `token` 和 `Authorization` 头
 - [ ] 验收：`size=100000` 返回被截断的结果；跨域 origin 的 WebSocket 握手被拒
 
 ---
@@ -68,11 +70,17 @@
 
 ### 网络与域名
 
-- [ ] 反向代理（Nginx / Caddy）+ HTTPS 证书，前端与 API 走同一域名或明确子域名
-- [ ] WebSocket 走 `wss://`，代理配置 `Upgrade` / `Connection` 头和读超时（SSE 问答同样需要关闭缓冲）
-- [ ] 前端构建参数 `NEXT_PUBLIC_API_BASE_URL` 改为正式域名（build 时内联，改了要重新构建）
-- [ ] 后端设置 `CORS_ALLOWED_ORIGINS` 为正式前端域名
-- [ ] 响应头：HSTS、`X-Content-Type-Options: nosniff`、`X-Frame-Options`、基础 CSP
+- [x] 反向代理（Nginx / Caddy）+ HTTPS 证书，前端与 API 走同一域名或明确子域名
+      ——Caddy（`deploy/Caddyfile` + `docker-compose.prod.yml`），自动 Let's Encrypt；`APP_DOMAIN` / `API_DOMAIN` 两个子域名
+      （后端 `/login` 等路径与前端路由同名，同域按路径分流会冲突）；frontend / backend 端口改为只绑 127.0.0.1
+- [x] WebSocket 走 `wss://`，代理配置 `Upgrade` / `Connection` 头和读超时（SSE 问答同样需要关闭缓冲）
+      ——Caddy 自动透传 Upgrade 且对长连接无空闲超时；SSE 路由 `flush_interval -1`，且只压缩 JSON，不压缩 event-stream
+- [x] 前端构建参数 `NEXT_PUBLIC_API_BASE_URL` 改为正式域名（build 时内联，改了要重新构建）
+      ——部署时在 `.env` 填 `https://<API_DOMAIN>`（`.env.example` 已说明），wss 地址由它自动推导
+- [x] 后端设置 `CORS_ALLOWED_ORIGINS` 为正式前端域名
+      ——compose 已透传 `CORS_ALLOWED_ORIGINS`，部署时在 `.env` 填 `https://<APP_DOMAIN>`
+- [x] 响应头：HSTS、`X-Content-Type-Options: nosniff`、`X-Frame-Options`、基础 CSP
+      ——在 Caddy 统一加；前端 CSP 放行 API 域名的 https/wss 与 https 图片，API 域名 `default-src 'none'`
 
 ### Compose 编排
 

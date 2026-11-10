@@ -4,6 +4,7 @@ import com.brayton.weibo.service.JWTService;
 import com.brayton.weibo.config.security.JwtHandshakeInterceptor;
 import com.brayton.weibo.config.security.JwtPrincipalHandshakeHandler;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;
 import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker;
@@ -17,12 +18,16 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     private final JWTService jwtService;
 
+    /** 与 REST CORS 共用同一份白名单（WebConfig），防止任意站点用用户的 token 建立 WebSocket */
+    @Value("${cors.allowed-origins:http://localhost:3000}")
+    private String[] allowedOrigins;
+
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
         registry.addEndpoint("/ws")  // 前端连接地址：/ws
                 .setHandshakeHandler(new JwtPrincipalHandshakeHandler())
                 .addInterceptors(new JwtHandshakeInterceptor(jwtService))
-                .setAllowedOriginPatterns("*");
+                .setAllowedOrigins(allowedOrigins);
     }
 
     @Override

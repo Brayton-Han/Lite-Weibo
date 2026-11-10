@@ -1,0 +1,33 @@
+# 生产叠加文件：在 docker-compose.yml 基础上加反向代理 caddy（80/443，自动 HTTPS）。
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+# 部署前在 .env 填好 APP_DOMAIN / API_DOMAIN / CORS_ALLOWED_ORIGINS / NEXT_PUBLIC_API_BASE_URL（见 .env.example）。
+# frontend / backend 的端口只绑 127.0.0.1，外部流量只能经 caddy 进入。
+
+services:
+  caddy:
+    image: caddy:2.10.2-alpine
+    container_name: caddy
+    depends_on:
+      - frontend
+      - backend
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?请在 .env 中设置 APP_DOMAIN}
+      API_DOMAIN: ${API_DOMAIN:?请在 .env 中设置 API_DOMAIN}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # 证书和 ACME 账号；删掉会重新申请，频繁重建可能触发 Let's Encrypt 限流
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+
+volumes:
+  caddy_data:
+  caddy_config:
