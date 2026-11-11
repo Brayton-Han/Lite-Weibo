@@ -98,7 +98,7 @@ public class IntentClassifier {
                 .maxTokens(256L)
                 .thinking(ThinkingConfigDisabled.builder().build())
                 .system(SYSTEM_PROMPT)
-                .addUserMessage("<query>\n" + query.strip() + "\n</query>")
+                .addUserMessage("<query>\n" + PromptText.escapeTags(query) + "\n</query>")
                 .outputConfig(IntentResult.class)
                 .build();
     }
