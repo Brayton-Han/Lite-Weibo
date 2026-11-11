@@ -23,7 +23,8 @@ import java.util.List;
  *
  * <h3>注入隔离</h3>
  * 帖子是不可信输入。它们只以 document 块进入 user 消息，问题单独包在 {@code <question>} 里，
- * system 规则 4 声明 document 里的一切都是数据。document 块开了 citations（要开就得全开），
+ * system 规则 4 声明 document 里的一切都是数据。{@code <question>} 是字符串拼接的，问题里的尖括号先转义成全角
+ * （{@link PromptText#escapeTags}），否则用户写 {@code </question>} 就能伪造标签。document 块开了 citations（要开就得全开），
  * 所以这个请求不能再用 {@code output_config.format}，两者同时用会 400。
  */
 @Component
@@ -71,7 +72,7 @@ public class AnswerPromptBuilder {
                     .build()));
         }
         userBlocks.add(ContentBlockParam.ofText(TextBlockParam.builder()
-                .text("<question>\n" + question.strip() + "\n</question>")
+                .text("<question>\n" + PromptText.escapeTags(question) + "\n</question>")
                 .build()));
 
         return MessageCreateParams.builder()
